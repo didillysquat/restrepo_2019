@@ -9,7 +9,7 @@ def dendrogram_sp(Z, p=30, truncate_mode=None, color_threshold=None,
                no_plot=False, no_labels=False, leaf_font_size=None,
                leaf_rotation=None, leaf_label_func=None,
                show_contracted=False, link_color_func=None, ax=None,
-               above_threshold_color='b', node_to_thickness_dict=None):
+               above_threshold_color='b', node_to_thickness_dict=None, default_line_thickness=None):
     """
     Plot the hierarchical clustering as a dendrogram.
 
@@ -351,14 +351,16 @@ def dendrogram_sp(Z, p=30, truncate_mode=None, color_threshold=None,
                          contraction_marks=contraction_marks,
                          ax=ax,
                          above_threshold_color=above_threshold_color,
-                         node_to_thickness_dict=node_to_thickness_dict)
+                         node_to_thickness_dict=node_to_thickness_dict,
+                         default_line_thickness=default_line_thickness)
 
     return R
 
 def _plot_dendrogram_sp(icoords, dcoords, ivl, p, n, mh, orientation,
                      no_labels, color_list, leaf_font_size=None,
                      leaf_rotation=None, contraction_marks=None,
-                     ax=None, above_threshold_color='b', node_to_thickness_dict=None):
+                     ax=None, above_threshold_color='b', node_to_thickness_dict=None,
+                        default_line_thickness=None):
     # Import matplotlib here so that it's not imported unless dendrograms
     # are plotted. Raise an informative error if importing fails.
     try:
@@ -452,7 +454,6 @@ def _plot_dendrogram_sp(icoords, dcoords, ivl, p, n, mh, orientation,
 
     # Let's use collections instead. This way there is a separate legend item
     # for each tree grouping, rather than stupidly one for each line segment.
-    default_line_thickness = 0.5
     colors_used = _remove_dups(color_list)
     color_to_lines = {}
     for color in colors_used:
