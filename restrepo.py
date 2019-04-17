@@ -20,6 +20,15 @@ I can change out the documents from the new remote symportal version.
 This way I can go ahead and implement the changes to UniFrac calculations on the local_dev branch and make use of this
 for this analysis now. THis way I don't have to wait for the change to the new SymPortal to be complete before
 proceeding with this analysis.
+
+Order of analysis
+
+3 - histogram_of_all_abundance_values
+4 - make_dendogram
+5 - create_profile_df_with_cutoff
+6 - get_list_of_clade_col_type_uids_for_unifrac
+7 - remake_dendogram
+
 """
 import os
 import pandas as pd
@@ -33,20 +42,24 @@ import hierarchy_sp
 import pickle
 
 class RestrepoAnalysis:
-    def __init__(self, profile_rel_abund_ouput_path, profile_abs_abund_ouput_path,
+    def __init__(self, base_input_dir, profile_rel_abund_ouput_path, profile_abs_abund_ouput_path,
                  seq_rel_abund_ouput_path, seq_abs_abund_ouput_path, clade_A_dist_path, clade_C_dist_path,
-                 clade_D_dist_path):
+                 clade_D_dist_path, ignore_cache=False):
         # Although we see clade F in the dataset this is minimal and so we will
         # tackle this sepeately to the analysis of the A, C and D.
         self.cwd = os.path.dirname(os.path.realpath(__file__))
         self.clades = list('ACD')
-
+        self.base_input_dir = base_input_dir
+        self.ignore_cache=ignore_cache
         # Paths to raw info files
-        self.profile_rel_abund_ouput_path = profile_rel_abund_ouput_path
-        self.profile_abs_abund_ouput_path = profile_abs_abund_ouput_path
-        self.seq_rel_abund_ouput_path = seq_rel_abund_ouput_path
-        self.seq_abs_abund_ouput_path = seq_abs_abund_ouput_path
-        self.clade_dist_path_dict = {'A' : clade_A_dist_path, 'C' : clade_C_dist_path, 'D' : clade_D_dist_path}
+        self.profile_rel_abund_ouput_path = os.path.join(self.base_input_dir, profile_rel_abund_ouput_path)
+        self.profile_abs_abund_ouput_path = os.path.join(self.base_input_dir, profile_abs_abund_ouput_path)
+        self.seq_rel_abund_ouput_path = os.path.join(self.base_input_dir, seq_rel_abund_ouput_path)
+        self.seq_abs_abund_ouput_path = os.path.join(self.base_input_dir, seq_abs_abund_ouput_path)
+        self.clade_dist_path_dict = {
+            'A' : os.path.join(self.base_input_dir, clade_A_dist_path),
+            'C' : os.path.join(self.base_input_dir, clade_C_dist_path),
+            'D' : os.path.join(self.base_input_dir, clade_D_dist_path)}
 
         # Iterative attributes
 
@@ -64,7 +77,7 @@ class RestrepoAnalysis:
         self._populate_clade_dist_df_dict()
         self.profile_df  = None
         self._populate_profile_df()
-
+        self.type_uid_to_name_dict = {}
         self.cutoff_abund = 0.06
         self.prof_df_cutoff = None
 
@@ -78,19 +91,33 @@ class RestrepoAnalysis:
         self.uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, 'dss_at_uid_tups.tsv')
 
     def _populate_clade_dist_df_dict(self):
+
+        if not self.ignore_cache:
+            self.pop_clade_dist_df_dict_from_cache_or_make_new()
+        else:
+            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out()
+
+    def pop_clade_dist_df_dict_from_cache_or_make_new(self):
         try:
             self.clade_dist_df_dict = pickle.load(file=open(self.clade_dist_dict_p_path, 'rb'))
         except FileNotFoundError:
-            for clade in self.clades:
-                with open(self.clade_dist_path_dict[clade], 'r') as f:
-                    clade_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f][1:]]
+            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out()
 
-                df = pd.DataFrame(clade_data)
-                df.set_index(keys=0, drop=True, inplace=True)
-                df.columns = df.index.values.tolist()
-                self.clade_dist_df_dict[clade] = df.astype(dtype='float')
-            pickle.dump(obj=self.clade_dist_df_dict, file=open(self.clade_dist_dict_p_path, 'wb'))
+    def _pop_clade_dict_df_dict_from_scratch_and_pickle_out(self):
+        self._pop_clade_dist_df_dict_from_scrath()
+        pickle.dump(obj=self.clade_dist_df_dict, file=open(self.clade_dist_dict_p_path, 'wb'))
 
+    def _pop_clade_dist_df_dict_from_scrath(self):
+        for clade in self.clades:
+            with open(self.clade_dist_path_dict[clade], 'r') as f:
+                clade_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f][1:]]
+
+            df = pd.DataFrame(clade_data)
+            self.type_uid_to_name_dict = {int(uid): name for uid, name in zip(df[1], df[0])}
+            df.drop(columns=0, inplace=True)
+            df.set_index(keys=1, drop=True, inplace=True)
+            df.columns = df.index.values.tolist()
+            self.clade_dist_df_dict[clade] = df.astype(dtype='float')
 
     def _populate_profile_df(self):
         # read in df
@@ -98,7 +125,7 @@ class RestrepoAnalysis:
         # collect sample uid to name info
         self.smp_uid_to_name_dict = {uid: name for uid, name in zip(df[0][7:-12], df[1][7:-12])}
         # del smp name column
-        del df[1]
+        df.drop(columns=1, inplace=True)
         # reset df col headers
         df.columns = range(len(list(df)))
         # Populate prof abund dicts
@@ -108,8 +135,18 @@ class RestrepoAnalysis:
         # drop meta info except for prof uid
         # top
         df.drop(index=range(1,7), inplace=True)
+
         # bottom
-        df = df.iloc[:-12,]
+        # get the index to crop from
+
+        index_list = df.index.values.tolist()
+        for i in range(len(index_list)):
+            if 'Sequence accession' in str(df.iloc[i,0]):
+                # then this is the first row to get rid of
+                index_to_cut_from = i
+                break
+
+        df = df.iloc[:index_to_cut_from,]
         # get prof uids to make into the column headers
         headers = [int(a) for a in df.iloc[0,1:].values.tolist()]
         # drop the prof uids
@@ -192,6 +229,7 @@ class RestrepoAnalysis:
     def create_profile_df_with_cutoff(self):
         # new_df = pd.DataFrame(index=self.profile_df.index.values.tolist(), columns=list(self.profile_df))
         num_profs_pre_cutoff = len(list(self.profile_df))
+        print(f'There are {num_profs_pre_cutoff} ITS2 type profiles before applying cutoff of {self.cutoff_abund}')
         self.prof_df_cutoff = self.profile_df.copy()
         # change values below cutoff to 0
         self.prof_df_cutoff = self.prof_df_cutoff.mask(cond=self.prof_df_cutoff < self.cutoff_abund, other=0)
@@ -201,11 +239,16 @@ class RestrepoAnalysis:
         # https://stackoverflow.com/questions/21164910/how-do-i-delete-a-column-that-contains-only-zeros-in-pandas
         self.prof_df_cutoff = self.prof_df_cutoff.loc[:, (self.prof_df_cutoff != 0).any(axis=0)]
         num_profs_post_cutoff = len(list(self.prof_df_cutoff))
+        print(f'There are {num_profs_post_cutoff} after.')
         num_profs_removed = num_profs_pre_cutoff - num_profs_post_cutoff
+        print(f'{num_profs_removed} ITS2 type profiles have been removed from the dataframe.')
         # get list of names of profiles removed due to cutoff
         profs_removed = [self.prof_uid_to_name_dict[uid] for uid in
                          list(self.profile_df) if
                          uid not in list(self.prof_df_cutoff)]
+        print('These profiles were:')
+        for prof in profs_removed:
+            print(prof)
 
     def get_list_of_clade_col_type_uids_for_unifrac(self):
         """ This is code for getting tuples of (DataSetSample uid, AnalysisType uid).
@@ -215,7 +258,20 @@ class RestrepoAnalysis:
         in our cutoff abundance count table.
         Once I have written the code in the SymPortal terminal I will put it in here as a comment."""
 
+        # CODE USED IN THE SYMPORTAL SHELL TO GET THE CladeCollectionType IDS
         # from dbApp.models import *
+        # with open('dss_at_uid_tups.tsv', 'r') as f:
+        #     tup_list = [line.rstrip() for line in f]
+        # tup_list = [(line.split('\t')[0], line.split('\t')[1]) for line in tup_list]
+        # cct_id_list = []
+        # for tup in tup_list:
+        #     at = AnalysisType.objects.get(id=tup[1])
+        #     dss = DataSetSample.objects.get(id=tup[0])
+        #     cc = CladeCollection.objects.get(data_set_sample_from=dss, clade=at.clade)
+        #     cct = CladeCollectionType.objects.get(analysis_type_of=at, clade_collection_found_in=cc)
+        #     cct_id_list.append(cct.id)
+
+
         # from the code here we can get a list that contains tuples of DataSetSample uids to AnalysisType uid for the
         # sample type pairings that we are interested in (i.e. the non-zeros in the cutoff df). We can then use these
         # ids to look up the CladeCollectionTypes we are interested in, get the uids of these, and pass these
@@ -227,6 +283,14 @@ class RestrepoAnalysis:
         with open(self.uid_pairs_for_ccts_path, 'w') as f:
             for tup in index_column_tups:
                 f.write(f'{tup[0]}\t{tup[1]}\n')
+        print(f'A list of tuples has been output to {self.uid_pairs_for_ccts_path} that represent the UID of paired '
+              f'DataSetSample and AnalysisType objects found in the filtered dataframe. '
+              f'From these you can get the CladeCollectionTypes. This can then be fed into the distance output function'
+              f'to calculate ITS2 type profile distances based only on these pairings.')
+
+        # the list of output CladeCollectionType uids is at:
+        # /Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/cc_id_list
+
         apples = 'asdf'
 
 
@@ -234,27 +298,23 @@ class RestrepoAnalysis:
 
 if __name__ == "__main__":
     rest_analysis = RestrepoAnalysis(
-        profile_rel_abund_ouput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/'
-                                     'resources/new_analysis_output/'
-                                     '65_DBV_20190401_2019-04-05_00-01-08.517088.profiles.relative.txt',
-        profile_abs_abund_ouput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/'
-                                     'resources/new_analysis_output/'
-                                     '65_DBV_20190401_2019-04-05_00-01-08.517088.profiles.absolute.txt',
-        seq_rel_abund_ouput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/'
-                                     'resources/new_analysis_output/'
-                                     '65_DBV_20190401_2019-04-05_00-01-08.517088.seqs.relative.txt',
-        seq_abs_abund_ouput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/'
-                                 'resources/new_analysis_output/'
-                                 '65_DBV_20190401_2019-04-05_00-01-08.517088.seqs.absolute.txt',
-        clade_A_dist_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/'
-                          'new_analysis_output/between_type_dist/A/'
-                          'test.txt',
-        clade_C_dist_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/'
-                          'new_analysis_output/between_type_dist/C/'
-                          '2019-04-07_14-16-40.814173.bray_curtis_within_clade_sample_distances.dist',
-        clade_D_dist_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/'
-                          'new_analysis_output/between_type_dist/D/'
-                          '2019-04-07_14-16-40.814173.bray_curtis_within_clade_sample_distances.dist')
+        base_input_dir = os.path.join(
+            '/Users', 'humebc', 'Google_Drive', 'projects', 'alejandro_et_al_2018',
+            'resources', 'sp_outputs_20190417', '2019-04-17_07-14-49.317290'),
+        profile_rel_abund_ouput_path='37_six_analysis_2019-04-17_07-14-49.317290.profiles.relative.txt',
+        profile_abs_abund_ouput_path='37_six_analysis_2019-04-17_07-14-49.317290.profiles.absolute.txt',
+        seq_rel_abund_ouput_path='37_six_analysis_2019-04-17_07-14-49.317290.seqs.relative.txt',
+        seq_abs_abund_ouput_path='37_six_analysis_2019-04-17_07-14-49.317290.seqs.absolute.txt',
+        clade_A_dist_path=os.path.join(
+            'between_profile_distances', 'A',
+            '2019-04-17_07-14-49.317290.bray_curtis_within_clade_profile_distances_A.dist'),
+        clade_C_dist_path=os.path.join(
+            'between_profile_distances', 'C',
+            '2019-04-17_07-14-49.317290.bray_curtis_within_clade_profile_distances_C.dist'),
+        clade_D_dist_path=os.path.join(
+            'between_profile_distances', 'D',
+            '2019-04-17_07-14-49.317290.bray_curtis_within_clade_profile_distances_D.dist'),
+        ignore_cache=True)
     rest_analysis.create_profile_df_with_cutoff()
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
