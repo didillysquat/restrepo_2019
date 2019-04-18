@@ -44,7 +44,8 @@ import pickle
 class RestrepoAnalysis:
     def __init__(self, base_input_dir, profile_rel_abund_ouput_path, profile_abs_abund_ouput_path,
                  seq_rel_abund_ouput_path, seq_abs_abund_ouput_path, clade_A_dist_path, clade_C_dist_path,
-                 clade_D_dist_path, ignore_cache=False):
+                 clade_D_dist_path, clade_A_dist_cct_specific_path=None, clade_C_dist_cct_specific_path=None,
+                 clade_D_dist_cct_specific_path=None, ignore_cache=False):
         # Although we see clade F in the dataset this is minimal and so we will
         # tackle this sepeately to the analysis of the A, C and D.
         self.cwd = os.path.dirname(os.path.realpath(__file__))
@@ -61,20 +62,33 @@ class RestrepoAnalysis:
             'C' : os.path.join(self.base_input_dir, clade_C_dist_path),
             'D' : os.path.join(self.base_input_dir, clade_D_dist_path)}
 
+        # Paths to the cct specific distances
+        self.clade_dist_cct_specific_path_dict = {
+            'A': os.path.join(self.base_input_dir, clade_A_dist_cct_specific_path),
+            'C': os.path.join(self.base_input_dir, clade_C_dist_cct_specific_path),
+            'D': os.path.join(self.base_input_dir, clade_D_dist_cct_specific_path)
+        }
+
         # Iterative attributes
 
         # cache implementation
         self.cache_dir = os.path.join(self.cwd, 'cache')
         os.makedirs(self.cache_dir, exist_ok=True)
         self.clade_dist_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_df_dict.p')
+        self.clade_dist_cct_specific_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_cct_specific_dict.p')
 
         # Info containers
         self.smp_uid_to_name_dict = None
         self.prof_uid_to_local_abund_dict = None
+        self.prof_uid_to_local_abund_dict_post_cutoff = {}
         self.prof_uid_to_global_abund_dict = None
         self.prof_uid_to_name_dict = None
         self.clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict()
+        self.clade_dist_cct_specific_df_dict = {}
+        if self.clade_dist_cct_specific_path_dict['A']:
+            # if we have the cct_speicifc distances
+            self._populate_clade_dist_df_dict(cct_specific=True)
         self.profile_df  = None
         self._populate_profile_df()
         self.type_uid_to_name_dict = {}
@@ -90,26 +104,36 @@ class RestrepoAnalysis:
         os.makedirs(self.outputs_dir, exist_ok=True)
         self.uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, 'dss_at_uid_tups.tsv')
 
-    def _populate_clade_dist_df_dict(self):
-
+    def _populate_clade_dist_df_dict(self, cct_specific=False):
+        """If cct_specific is set then we are making dfs for the distance matrices that are from the bespoke
+        set of CladeCollectionTypes. If not set then it is the first set of distances that have come straight out
+        of the SymPortal analysis with no prior processing. I have implemented a simple cache system."""
         if not self.ignore_cache:
-            self.pop_clade_dist_df_dict_from_cache_or_make_new()
+            self.pop_clade_dist_df_dict_from_cache_or_make_new(cct_specific)
         else:
-            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out()
+            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific)
 
-    def pop_clade_dist_df_dict_from_cache_or_make_new(self):
+    def pop_clade_dist_df_dict_from_cache_or_make_new(self, cct_specific):
         try:
-            self.clade_dist_df_dict = pickle.load(file=open(self.clade_dist_dict_p_path, 'rb'))
+            if cct_specific:
+                self.clade_dist_cct_specific_df_dict = pickle.load(
+                    file=open(self.clade_dist_cct_specific_dict_p_path, 'rb'))
+            else:
+                self.clade_dist_df_dict = pickle.load(file=open(self.clade_dist_dict_p_path, 'rb'))
         except FileNotFoundError:
-            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out()
+            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific)
 
-    def _pop_clade_dict_df_dict_from_scratch_and_pickle_out(self):
-        self._pop_clade_dist_df_dict_from_scrath()
+    def _pop_clade_dict_df_dict_from_scratch_and_pickle_out(self, cct_specific):
+        self._pop_clade_dist_df_dict_from_scrath(cct_specific)
         pickle.dump(obj=self.clade_dist_df_dict, file=open(self.clade_dist_dict_p_path, 'wb'))
 
-    def _pop_clade_dist_df_dict_from_scrath(self):
+    def _pop_clade_dist_df_dict_from_scrath(self, cct_specific):
+        if cct_specific:
+            path_dict_to_use = self.clade_dist_cct_specific_path_dict
+        else:
+            path_dict_to_use = self.clade_dist_path_dict
         for clade in self.clades:
-            with open(self.clade_dist_path_dict[clade], 'r') as f:
+            with open(path_dict_to_use[clade], 'r') as f:
                 clade_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f][1:]]
 
             df = pd.DataFrame(clade_data)
@@ -117,7 +141,10 @@ class RestrepoAnalysis:
             df.drop(columns=0, inplace=True)
             df.set_index(keys=1, drop=True, inplace=True)
             df.columns = df.index.values.tolist()
-            self.clade_dist_df_dict[clade] = df.astype(dtype='float')
+            if cct_specific:
+                self.clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
+            else:
+                self.clade_dist_df_dict[clade] = df.astype(dtype='float')
 
     def _populate_profile_df(self):
         # read in df
@@ -158,7 +185,7 @@ class RestrepoAnalysis:
         df.index = df.index.astype('int')
         self.profile_df = df
 
-    def make_dendogram(self):
+    def make_dendogram(self, cct_specific=False):
         """I have modified the scipi.cluster.hierarchy.dendrogram so that it can take a line thickness dictionary.
         It will use this dictionary to modify the thickness of the leaves on the dendrogram so that we can see which
         types were the most abundant.
@@ -167,9 +194,18 @@ class RestrepoAnalysis:
         The matrix must first be condensed. Again, misleadingly, this can be done using the poorly named squareform()
         that does both condensed to redundant and vice versa.
 
+        If the cct_specific distance are available then I will make this a plot of the the non_cct_specific
+        side by side with the cct_specific so that we can see if there are any significant differences.
+
         """
+
+        if cct_specific:
+            distance_df_dict_to_use = self.clade_dist_cct_specific_df_dict
+        else:
+            distance_df_dict_to_use = self.clade_dist_df_dict
+
         for clade in self.clades:
-            dist_df = self.clade_dist_df_dict[clade]
+            dist_df = distance_df_dict_to_use[clade]
             condensed_dist = scipy.spatial.distance.squareform(dist_df)
             # this creates the linkage df that will be passed into the dendogram_sp function
             linkage = scipy.cluster.hierarchy.linkage(y=condensed_dist, optimal_ordering=True)
@@ -227,9 +263,13 @@ class RestrepoAnalysis:
         plt.savefig(os.path.join(self.figure_dir, 'hist.png'), dpi=1200)
 
     def create_profile_df_with_cutoff(self):
-        # new_df = pd.DataFrame(index=self.profile_df.index.values.tolist(), columns=list(self.profile_df))
+        """Creates a new df from the old df that has all of the values below the cutoff_abundance threshold
+        made to 0. We will also calculate a new prof_uid_to_local_abund_dict_post_cutoff dictionary.
+        """
+
         num_profs_pre_cutoff = len(list(self.profile_df))
         print(f'There are {num_profs_pre_cutoff} ITS2 type profiles before applying cutoff of {self.cutoff_abund}')
+        # make new df from copy of old df
         self.prof_df_cutoff = self.profile_df.copy()
         # change values below cutoff to 0
         self.prof_df_cutoff = self.prof_df_cutoff.mask(cond=self.prof_df_cutoff < self.cutoff_abund, other=0)
@@ -249,6 +289,20 @@ class RestrepoAnalysis:
         print('These profiles were:')
         for prof in profs_removed:
             print(prof)
+
+        # calculate how many unique DataSetSample to ITS2 type profile associations there are.
+        num_associations_pre_cutoff = len(list(self.profile_df[self.profile_df > 0].stack().index))
+        num_associations_post_cutoff = len(list(self.prof_df_cutoff[self.prof_df_cutoff > 0].stack().index))
+        print(f'The number of unique DataSetSample to ITS2 type profile associations was {num_associations_pre_cutoff}.')
+        print(f'The number of unique DataSetSample to ITS2 type profile associations '
+              f'after cutoff is {num_associations_post_cutoff}')
+
+        # now populate the new prof_uid_to_local_abund_dict_post_cutoff dictionary
+        for i in list(self.prof_df_cutoff):  # for each column of the df
+            temp_series = self.prof_df_cutoff[i]
+            local_count = len(temp_series[temp_series > 0].index.values.tolist())
+            self.prof_uid_to_local_abund_dict_post_cutoff[i] = local_count
+
 
     def get_list_of_clade_col_type_uids_for_unifrac(self):
         """ This is code for getting tuples of (DataSetSample uid, AnalysisType uid).
@@ -314,8 +368,17 @@ if __name__ == "__main__":
         clade_D_dist_path=os.path.join(
             'between_profile_distances', 'D',
             '2019-04-17_07-14-49.317290.bray_curtis_within_clade_profile_distances_D.dist'),
+        clade_A_dist_cct_specific_path=os.path.join(
+            'cct_specific_between_profile_distances','2019-04-16_08-37-52_564623', 'between_profiles','A',
+            '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_A.dist'),
+        clade_C_dist_cct_specific_path=os.path.join(
+            'cct_specific_between_profile_distances', '2019-04-16_08-37-52_564623','between_profiles','C',
+            '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_C.dist'),
+        clade_D_dist_cct_specific_path=os.path.join(
+            'cct_specific_between_profile_distances', '2019-04-16_08-37-52_564623','between_profiles','D',
+            '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_D.dist'),
         ignore_cache=True)
     rest_analysis.create_profile_df_with_cutoff()
+    rest_analysis.make_dendogram(cct_specific=True)
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
-    rest_analysis.make_dendogram()
