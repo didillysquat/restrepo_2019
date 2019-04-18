@@ -140,6 +140,7 @@ class RestrepoAnalysis:
             self.type_uid_to_name_dict = {int(uid): name for uid, name in zip(df[1], df[0])}
             df.drop(columns=0, inplace=True)
             df.set_index(keys=1, drop=True, inplace=True)
+            df.index = df.index.astype('int')
             df.columns = df.index.values.tolist()
             if cct_specific:
                 self.clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
@@ -194,43 +195,80 @@ class RestrepoAnalysis:
         The matrix must first be condensed. Again, misleadingly, this can be done using the poorly named squareform()
         that does both condensed to redundant and vice versa.
 
-        If the cct_specific distance are available then I will make this a plot of the the non_cct_specific
+        If the cct_specific distance are not available then I will make this a plot of the the non_cct_specific
         side by side with the cct_specific so that we can see if there are any significant differences.
 
         """
 
         if cct_specific:
-            distance_df_dict_to_use = self.clade_dist_cct_specific_df_dict
+            # draw dendrograms in pairs
+            for clade in self.clades:
+                fig, axarr = plt.subplots(1,2,figsize=(16, 12))
+
+                # plot the non cutoff dendro first
+                self._make_dendrogram_figure(
+                    clade=clade, ax=axarr[0], dist_df=self.clade_dist_df_dict[clade],
+                    local_abundance_dict = self.prof_uid_to_local_abund_dict)
+
+                # then the cct specific
+                self._make_dendrogram_figure(
+                    clade=clade, ax=axarr[1], dist_df=self.clade_dist_cct_specific_df_dict[clade],
+                    local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff)
+
+                plt.tight_layout()
+                plt.savefig(os.path.join(self.figure_dir, f'paired_dendogram_{clade}.png'))
+                plt.savefig(os.path.join(self.figure_dir, f'paired_dendogram_{clade}.svg'))
+
+
         else:
-            distance_df_dict_to_use = self.clade_dist_df_dict
+            # draw a single dendrogram per clade
+            for clade in self.clades:
+                fig, ax = plt.subplots(figsize=(8, 12))
+                self._make_dendrogram_figure(clade=clade, ax=ax, dist_df=self.clade_dist_df_dict[clade],
+                                             local_abundance_dict=self.prof_uid_to_local_abund_dict)
+                plt.tight_layout()
 
-        for clade in self.clades:
-            dist_df = distance_df_dict_to_use[clade]
-            condensed_dist = scipy.spatial.distance.squareform(dist_df)
-            # this creates the linkage df that will be passed into the dendogram_sp function
-            linkage = scipy.cluster.hierarchy.linkage(y=condensed_dist, optimal_ordering=True)
-            fig, ax = plt.subplots(figsize=(8,12))
 
-            # generate the thickness dictionary. Lets work with line thicknesses of 1, 2, 3 and 4
-            # assign according to which quartile
-            max_abund = sorted([value for uid, value in self.prof_uid_to_local_abund_dict.items() if clade in self.prof_uid_to_name_dict[uid]], reverse=True)[0]
-            thickness_dict = {}
-            for uid in list(self.profile_df):
-                if clade in self.prof_uid_to_name_dict[uid]:
-                    abund = self.prof_uid_to_local_abund_dict[uid]
-                    if abund < max_abund* 0.1:
-                        thickness_dict[self.prof_uid_to_name_dict[uid]] = 1
-                    elif abund < max_abund * 0.2:
-                        thickness_dict[self.prof_uid_to_name_dict[uid]] = 2
-                    elif abund < max_abund * 0.3:
-                        thickness_dict[self.prof_uid_to_name_dict[uid]] = 3
-                    else:
-                        thickness_dict[self.prof_uid_to_name_dict[uid]] = 4
+    def _make_dendrogram_figure(self, clade, ax, dist_df, local_abundance_dict):
+        """Plot a dendrogram """
+        condensed_dist = scipy.spatial.distance.squareform(dist_df)
+        # this creates the linkage df that will be passed into the dendogram_sp function
+        linkage = scipy.cluster.hierarchy.linkage(y=condensed_dist, optimal_ordering=True)
+        thickness_dict = self._make_thickness_dict(clade, dist_df, local_abundance_dict)
+        labels = self._make_labels_list(dist_df, local_abundance_dict)
+        self._draw_one_dendrogram(ax, labels, linkage, thickness_dict)
 
-            den = hierarchy_sp.dendrogram_sp(linkage, labels=dist_df.index.values.tolist(), ax=ax,
-                                            node_to_thickness_dict=thickness_dict,
-                                             default_line_thickness=0.5)
-            plt.tight_layout()
+    def _make_thickness_dict(self, clade, dist_df, local_abundance_dict):
+        # generate the thickness dictionary. Lets work with line thicknesses of 1, 2, 3 and 4
+        # assign according to which quartile
+        max_abund = \
+        sorted([value for uid, value in local_abundance_dict.items() if clade in self.prof_uid_to_name_dict[uid]],
+               reverse=True)[0]
+        thickness_dict = {}
+        for uid in dist_df.index.values.tolist():
+            abund = local_abundance_dict[uid]
+            if abund < max_abund * 0.1:
+                thickness_dict[f'{self.prof_uid_to_name_dict[uid]} ({local_abundance_dict[uid]})'] = 1
+            elif abund < max_abund * 0.2:
+                thickness_dict[f'{self.prof_uid_to_name_dict[uid]} ({local_abundance_dict[uid]})'] = 2
+            elif abund < max_abund * 0.3:
+                thickness_dict[f'{self.prof_uid_to_name_dict[uid]} ({local_abundance_dict[uid]})'] = 3
+            elif abund < max_abund * 0.5:
+                thickness_dict[f'{self.prof_uid_to_name_dict[uid]} ({local_abundance_dict[uid]})'] = 4
+            elif abund < max_abund * 0.7:
+                thickness_dict[f'{self.prof_uid_to_name_dict[uid]} ({local_abundance_dict[uid]})'] = 5
+            else:
+                thickness_dict[f'{self.prof_uid_to_name_dict[uid]} ({local_abundance_dict[uid]})'] = 6
+        return thickness_dict
+
+    def _make_labels_list(self, dist_df, local_abundance_dict):
+        labels = [f'{self.prof_uid_to_name_dict[uid]} ({local_abundance_dict[uid]})' for uid in dist_df.index.values.tolist()]
+        return labels
+
+    def _draw_one_dendrogram(self, ax, labels, linkage, thickness_dict):
+        den = hierarchy_sp.dendrogram_sp(linkage, labels=labels, ax=ax,
+                                         node_to_thickness_dict=thickness_dict,
+                                         default_line_thickness=0.5, leaf_rotation=90)
 
     def histogram_of_all_abundance_values(self):
         """ Plot a histogram of all of the type-rel-abund pairings so that we can assess whether there is a sensible
