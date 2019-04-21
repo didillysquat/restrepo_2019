@@ -344,7 +344,7 @@ def dendrogram_sp(Z, p=30, truncate_mode=None, color_threshold=None,
 
     if not no_plot:
         mh = max(Z[:, 2])
-        _plot_dendrogram_sp(icoord_list, dcoord_list, ivl, p, n, mh, orientation,
+        tick_to_profile_name_dict = _plot_dendrogram_sp(icoord_list, dcoord_list, ivl, p, n, mh, orientation,
                          no_labels, color_list,
                          leaf_font_size=leaf_font_size,
                          leaf_rotation=leaf_rotation,
@@ -354,6 +354,7 @@ def dendrogram_sp(Z, p=30, truncate_mode=None, color_threshold=None,
                          node_to_thickness_dict=node_to_thickness_dict,
                          default_line_thickness=default_line_thickness)
 
+        R['tick_to_profile_name_dict'] = tick_to_profile_name_dict
     return R
 
 def _plot_dendrogram_sp(icoords, dcoords, ivl, p, n, mh, orientation,
@@ -517,7 +518,11 @@ def _plot_dendrogram_sp(icoords, dcoords, ivl, p, n, mh, orientation,
     if trigger_redraw:
         matplotlib.pylab.draw_if_interactive()
 
+    return tick_to_profile_name_dict
 class LineInfo:
-    def __init__(self, coord_list, thickness):
+    """Coord_list is a list of tuples which represent x,y coordinates for points along the line
+    including start and finish."""
+    def __init__(self, coord_list, thickness, color=None):
         self.coord_list = coord_list
         self.thickness = thickness
+        self.color=color

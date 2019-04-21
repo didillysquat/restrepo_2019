@@ -39,13 +39,15 @@ Assess why the UniFrac distance approximation is not working so well
 import os
 import pandas as pd
 import matplotlib as mpl
-mpl.use('TkAgg')
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.cluster.hierarchy
 import scipy.spatial.distance
 import numpy as np
 import hierarchy_sp
 import pickle
+import matplotlib.gridspec as gridspec
+from matplotlib import collections
 
 class RestrepoAnalysis:
     def __init__(self, base_input_dir, profile_rel_abund_ouput_path, profile_abs_abund_ouput_path,
@@ -211,6 +213,7 @@ class RestrepoAnalysis:
 
         apples = 'asdf'
 
+
     def _add_new_name_to_old_name_entry_manually(self, new_name, new_name_to_old_name_dict, old_to_search):
         if new_name == 'Q15G6':
             new_name_to_old_name_dict[new_name] = 'Q16G6_Q16G6_N711-S506'
@@ -332,7 +335,129 @@ class RestrepoAnalysis:
         df.index = df.index.astype('int')
         self.profile_df = df
 
-    def make_dendogram(self, cct_specific=False):
+
+    def make_dendrogram_with_meta(self):
+        """This function will make a figure that has a dendrogram at the top, the labels under that, then
+        under this it will have data that link the metainfo to each of the types found.
+        NB, I have modified the returned dictionary from hierarchy_sp.dendrogram_sp so that it contains the
+        tick_to_profile_name_dict that we can use to easily associate the label that should be plotted in the
+        labels plot.
+
+        NB we are having some problems with properly getting the bounding box coordinates of the labels during TkAgg
+        rendering, i.e. interactive redering during debug. However it works find during actual running of the code
+        using the Agg backend.
+
+        NB getting the bounding boxes for the annoations is quite involved.
+        It basically involves calling get_window_extent() on the annotation object. This will give you a bbox object
+        which has its units in display units. You then have to transform this back to data units.
+        This link for getting the bbox from the annotation:
+        https://matplotlib.org/api/text_api.html#matplotlib.text.Annotation.get_window_extent
+        This link for doing the transofrmations into the correct coordinates space:
+        https://matplotlib.org/users/transforms_tutorial.html
+        """
+
+        fig = plt.figure(figsize=(6, 8))
+        # required for getting the bbox of the text annotations
+        fig.canvas.draw()
+
+        apples = 'asdf'
+        dendro_height = 20
+        label_height = 12
+        meta_height = 1
+        num_meta = 5
+        total_plot_height = dendro_height + label_height + (num_meta * meta_height)
+        for clade in self.clades:
+            self._make_dendro_with_meta_fig_for_clade(clade, dendro_height, label_height, total_plot_height)
+
+    def _make_dendro_with_meta_fig_for_clade(self, clade, dendro_height, label_height, total_plot_height):
+        dend_ax, labels_ax = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig(dendro_height, label_height,
+                                                                                    total_plot_height)
+        # Plot the dendrogram in first axes
+        dendro_info = self._make_dendrogram_figure(
+            clade=clade, ax=dend_ax, dist_df=self.clade_dist_cct_specific_df_dict[clade],
+            local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
+
+        self._plot_labels_plot_for_dendro_and_meta_fig(dend_ax, dendro_info, labels_ax)
+
+        print('Saving image')
+        plt.savefig('here.png', dpi=1200)
+
+    def _plot_labels_plot_for_dendro_and_meta_fig(self, dend_ax, dendro_info, labels_ax):
+        # make the x axis limits of the labels plot exactly the same as the dendrogram plot
+        # then we can use the dendrogram plot x coordinates to plot the labels in the labels plot.
+        labels_ax.set_xlim(dend_ax.get_xlim())
+
+        annotation_list = self._store_and_annotate_labels(dendro_info, labels_ax)
+
+        lines = self._create_connection_lines(annotation_list, labels_ax)
+
+        coll = self._create_lines_collection(lines)
+
+        self._add_lines_to_axis(coll, labels_ax)
+
+        labels_ax.axis('off')
+
+    def _add_lines_to_axis(self, coll, labels_ax):
+        labels_ax.add_collection(coll)
+
+    def _create_lines_collection(self, lines):
+        coll = collections.LineCollection([ln_info.coord_list for ln_info in lines], colors=('black',),
+                                          linestyles=('dotted',),
+                                          linewidths=[ln_info.thickness for ln_info in lines])
+        return coll
+
+    def _create_connection_lines(self, annotation_list, labels_ax):
+        lines = []
+        min_gap_to_plot = 0  # the minimum dist required between label and bottom of plot
+        y_val_buffer = 0.02  # the distance to leave between the line and the label
+        for ann in annotation_list:
+            bbox = ann.get_window_extent()
+            inv = labels_ax.transData.inverted()
+            bbox_data = inv.transform([(bbox.x0, bbox.y0), (bbox.x1, bbox.y1)])
+            line_x = (bbox_data[1][0] + bbox_data[0][0]) / 2
+
+            if bbox_data[0][1] > min_gap_to_plot and bbox_data[0][
+                1] > y_val_buffer:  # then we should draw the connecting lines
+                # the bottom connecting line
+                lines.append(
+                    hierarchy_sp.LineInfo([(line_x, min_gap_to_plot), (line_x, bbox_data[0][1] - y_val_buffer)],
+                                          thickness=0.5, color='black'))
+                # the top connecting line
+                lines.append(
+                    hierarchy_sp.LineInfo([(line_x, bbox_data[1][1] + y_val_buffer), (line_x, 1 - min_gap_to_plot)],
+                                          thickness=0.5, color='black'))
+            else:
+                # the label is too large and there is no space to draw the connecting line
+                pass
+
+            # box_width = bbox_data[1][0] - bbox_data[0][0]
+            # box_height = bbox_data[1][1] - bbox_data[0][1]
+            # rec = patches.Rectangle((bbox_data[0][0], bbox_data[0][1]), box_width, box_height)
+            # labels_ax.add_patch(rec)
+        return lines
+
+    def _store_and_annotate_labels(self, dendro_info, labels_ax):
+        # Draw the annotations onto text annotations onto axes
+        annotation_list = []
+        for x_loc, lab_str in dendro_info['tick_to_profile_name_dict'].items():
+            # fig.canvas.draw()
+            annotation_list.append(
+                labels_ax.annotate(s=lab_str, xy=(x_loc, 0.5), rotation='vertical', horizontalalignment='center',
+                                   verticalalignment='center', fontsize='x-small', fontweight='bold'))
+        return annotation_list
+
+    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig(self, dendro_height, label_height, total_plot_height):
+        gs = gridspec.GridSpec(total_plot_height, 1)
+        # dendrogram axis
+        dend_ax = plt.subplot(gs[0:dendro_height, 0:1])
+        # labels ax
+        labels_ax = plt.subplot(gs[dendro_height:dendro_height + label_height, 0:1])
+        meta_axes_list = []
+        for i in range(dendro_height + label_height, total_plot_height, 1):
+            meta_axes_list.append(plt.subplot(gs[i:i + 1, 0:1]))
+        return dend_ax, labels_ax
+
+    def make_dendrogram(self, cct_specific=False):
         """I have modified the scipi.cluster.hierarchy.dendrogram so that it can take a line thickness dictionary.
         It will use this dictionary to modify the thickness of the leaves on the dendrogram so that we can see which
         types were the most abundant.
@@ -347,7 +472,9 @@ class RestrepoAnalysis:
         """
 
         if cct_specific:
-            # draw dendrograms in pairs
+            # draw dendrograms in pairs where left is passed the types and abundances before the cutoff is applied
+            # and before the specific cct distances have been caclulated, and the right is after these processing
+            # steps have been applied.
             for clade in self.clades:
                 fig, axarr = plt.subplots(1,2,figsize=(16, 12))
 
@@ -374,15 +501,16 @@ class RestrepoAnalysis:
                                              local_abundance_dict=self.prof_uid_to_local_abund_dict)
                 plt.tight_layout()
 
-
-    def _make_dendrogram_figure(self, clade, ax, dist_df, local_abundance_dict):
-        """Plot a dendrogram """
+    def _make_dendrogram_figure(self, clade, ax, dist_df, local_abundance_dict, plot_labels=True):
+        """This is a method specifically aimed at plotting a single dendrogram and is used
+        inside the methods that put larger figures together e.g. make_dendogram """
         condensed_dist = scipy.spatial.distance.squareform(dist_df)
         # this creates the linkage df that will be passed into the dendogram_sp function
         linkage = scipy.cluster.hierarchy.linkage(y=condensed_dist, optimal_ordering=True)
         thickness_dict = self._make_thickness_dict(clade, dist_df, local_abundance_dict)
         labels = self._make_labels_list(dist_df, local_abundance_dict)
-        self._draw_one_dendrogram(ax, labels, linkage, thickness_dict)
+        return self._draw_one_dendrogram(ax, labels, linkage, thickness_dict, plot_labels)
+
 
     def _make_thickness_dict(self, clade, dist_df, local_abundance_dict):
         # generate the thickness dictionary. Lets work with line thicknesses of 1, 2, 3 and 4
@@ -411,10 +539,11 @@ class RestrepoAnalysis:
         labels = [f'{self.prof_uid_to_name_dict[uid]} ({local_abundance_dict[uid]})' for uid in dist_df.index.values.tolist()]
         return labels
 
-    def _draw_one_dendrogram(self, ax, labels, linkage, thickness_dict):
-        den = hierarchy_sp.dendrogram_sp(linkage, labels=labels, ax=ax,
+    def _draw_one_dendrogram(self, ax, labels, linkage, thickness_dict, plot_labels=True):
+        return hierarchy_sp.dendrogram_sp(linkage, labels=labels, ax=ax,
                                          node_to_thickness_dict=thickness_dict,
-                                         default_line_thickness=0.5, leaf_rotation=90)
+                                         default_line_thickness=0.5, leaf_rotation=90, no_labels=not plot_labels)
+
 
     def histogram_of_all_abundance_values(self):
         """ Plot a histogram of all of the type-rel-abund pairings so that we can assess whether there is a sensible
@@ -563,6 +692,6 @@ if __name__ == "__main__":
             '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_D.dist'),
         meta_data_indput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/meta_info.csv',
         ignore_cache=True, cutoff_abund=0.06)
-    rest_analysis.make_dendogram(cct_specific=True)
+    rest_analysis.make_dendrogram_with_meta()
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
