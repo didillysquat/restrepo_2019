@@ -28,6 +28,12 @@ Order of analysis
 5 - create_profile_df_with_cutoff
 6 - get_list_of_clade_col_type_uids_for_unifrac
 7 - remake_dendogram
+8 - make meta data df
+
+TODO list:
+plot up the dendogram with the meta information below
+Assess correlations at differing levels of collapse
+Assess why the UniFrac distance approximation is not working so well
 
 """
 import os
@@ -45,7 +51,7 @@ class RestrepoAnalysis:
     def __init__(self, base_input_dir, profile_rel_abund_ouput_path, profile_abs_abund_ouput_path,
                  seq_rel_abund_ouput_path, seq_abs_abund_ouput_path, clade_A_dist_path, clade_C_dist_path,
                  clade_D_dist_path, clade_A_dist_cct_specific_path=None, clade_C_dist_cct_specific_path=None,
-                 clade_D_dist_cct_specific_path=None, ignore_cache=False):
+                 clade_D_dist_cct_specific_path=None, ignore_cache=False, meta_data_indput_path=None, cutoff_abund=None):
         # Although we see clade F in the dataset this is minimal and so we will
         # tackle this sepeately to the analysis of the A, C and D.
         self.cwd = os.path.dirname(os.path.realpath(__file__))
@@ -79,6 +85,7 @@ class RestrepoAnalysis:
 
         # Info containers
         self.smp_uid_to_name_dict = None
+        self.smp_name_to_uid_dict = None
         self.prof_uid_to_local_abund_dict = None
         self.prof_uid_to_local_abund_dict_post_cutoff = {}
         self.prof_uid_to_global_abund_dict = None
@@ -92,8 +99,18 @@ class RestrepoAnalysis:
         self.profile_df  = None
         self._populate_profile_df()
         self.type_uid_to_name_dict = {}
-        self.cutoff_abund = 0.06
-        self.prof_df_cutoff = None
+        if cutoff_abund is not None:
+            self.cutoff_abund = cutoff_abund
+            self.prof_df_cutoff = None
+            self.create_profile_df_with_cutoff()
+        else:
+            self.cutoff_abund = cutoff_abund
+            self.prof_df_cutoff = None
+        # metadata_info_df
+        if meta_data_indput_path is not None:
+            self.metadata_info_df = self._init_metadata_info_df(meta_data_indput_path)
+        else:
+            self.metadata_info_df = None
 
         # figures
         self.figure_dir = os.path.join(self.cwd, 'figures')
@@ -103,6 +120,128 @@ class RestrepoAnalysis:
         self.outputs_dir = os.path.join(self.cwd, 'outputs')
         os.makedirs(self.outputs_dir, exist_ok=True)
         self.uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, 'dss_at_uid_tups.tsv')
+
+    def _init_metadata_info_df(self, meta_info_path):
+        """The matching of names between the SP output and the meta info that Alejandro was working from was causing us
+        some issues. There were 10 samples names in the meta info that were not matching up with the SP sample names.
+
+        The following names were not finding matches or found 2 matches:
+        New name Q15G6 not found in SP output 0
+        New name Q15G7 not found in SP output 0
+        New name SN15G10 not found in SP output 0
+        New name SN15G6 not found in SP output 0
+        New name SN15G7 not found in SP output 0
+        New name SN15G8 not found in SP output 0
+        New name SN15G9 not found in SP output 0
+        New name FS15SE8 found in SP output twice 2
+        New name SN15G2 not found in SP output 0
+        New name T1PC4 not found in SP output 0
+
+        It looks like some of the 15 names have been called 16 in the SP output due to the fact that this is the
+        name given to the sequencing files. Obviously 15 is the correct name as this related to the depth that the
+        sample was taken at. To link these old names to the new names I will manually append the correct associations
+        between SP output name and meta info name to the new_name_to_old_name_dict. (annoying but necessary).
+
+        Given that the SP sample names are derived from the fastq files and that the
+
+        meta_info_name  sp_output_name
+        Q15G6           Q16G6
+        Q15G7           Q16G7
+        SN15G10         SN16G10
+        SN15G6         SN16G6
+        SN15G7         SN16G7
+        SN15G8         SN16G8
+        SN15G9         SN16G9
+        FS15SE8         FS15SE8(702)
+        SN15G2          SN25G2
+        T1PC4           TIPC4
+
+        NB that FS15SE8 matched two samples in the SP output. I associated this sample to the SP output sample
+        that most closely related samples FS15SE6 and FS15SE10 that were taken from the same reef, depth, species
+        and season.
+
+        NB we are left over with one extra sample in the SP output as there were 605 samples in the SP output
+        but only 604 samples in the meta info. This appears to be due to the duplicate FS15SE8 sample.
+
+        We should therefore probably delete this sample from the profiles and smpls df.
+        """
+        mata_info_df = pd.DataFrame.from_csv(meta_info_path)
+        # The same names in the meta info are different from those in the SymPortal output.
+        # parse through the meta info names and make sure theat they are found in only one of the SP output names
+        # then, we can simply modify the sample uid to name dictionary (or better make a new one)
+        new_name_to_old_name_dict = {}
+        old_to_search = list(self.smp_uid_to_name_dict.values())
+        len_new = len(mata_info_df.index.values.tolist())
+        len_old = len(old_to_search)
+        for new_name in mata_info_df.index.values.tolist():
+            if new_name in ['Q15G6', 'Q15G7', 'SN15G10', 'SN15G6', 'SN15G7', 'SN15G8', 'SN15G9', 'FS15SE8', 'SN15G2', 'T1PC4']:
+                self._add_new_name_to_old_name_entry_manually(new_name, new_name_to_old_name_dict, old_to_search)
+            else:
+                count = 0
+                for old_name in old_to_search:
+                    if new_name in old_name:
+                        old_name_match = old_name
+
+
+                        count += 1
+                if count != 1:
+                    print(f'New name {new_name} not found in SP output {count}')
+                else:
+                    new_name_to_old_name_dict[new_name] = old_name_match
+                    old_to_search.remove(old_name_match)
+
+        # delete 'FS15SE8_FS15SE8_N705-S508' from the df
+        for uid, name in self.smp_uid_to_name_dict.items():
+            if name == 'FS15SE8_FS15SE8_N705-S508':
+                self.profile_df.drop(index=uid, inplace=True)
+                if self.prof_df_cutoff is not None:
+                    self.prof_df_cutoff.drop(index=uid, inplace=True)
+                break
+
+        # now that we have a conversion from new_name to old name, we can use this to look up the uid of the
+        # mata info sample names in relation to the SP outputs. And use these uids as index rather than the meta info
+        # names
+        new_uid_index = []
+        for new_name in mata_info_df.index.values.tolist():
+            new_uid_index.append(int(self.smp_name_to_uid_dict[new_name_to_old_name_dict[new_name]]))
+
+        mata_info_df.index = new_uid_index
+        return mata_info_df
+
+
+        apples = 'asdf'
+
+    def _add_new_name_to_old_name_entry_manually(self, new_name, new_name_to_old_name_dict, old_to_search):
+        if new_name == 'Q15G6':
+            new_name_to_old_name_dict[new_name] = 'Q16G6_Q16G6_N711-S506'
+            old_to_search.remove('Q16G6_Q16G6_N711-S506')
+        elif new_name == 'Q15G7':
+            new_name_to_old_name_dict[new_name] = 'Q16G7_Q16G7_N712-S506'
+            old_to_search.remove('Q16G7_Q16G7_N712-S506')
+        elif new_name == 'SN15G10':
+            new_name_to_old_name_dict[new_name] = 'SN16G10_SN16G10_N712-S505'
+            old_to_search.remove('SN16G10_SN16G10_N712-S505')
+        elif new_name == 'SN15G6':
+            new_name_to_old_name_dict[new_name] = 'SN16G6_SN16G6_N708-S505'
+            old_to_search.remove('SN16G6_SN16G6_N708-S505')
+        elif new_name == 'SN15G7':
+            new_name_to_old_name_dict[new_name] = 'SN16G7_SN16G7_N709-S505'
+            old_to_search.remove('SN16G7_SN16G7_N709-S505')
+        elif new_name == 'SN15G8':
+            new_name_to_old_name_dict[new_name] = 'SN16G8_SN16G8_N710-S505'
+            old_to_search.remove('SN16G8_SN16G8_N710-S505')
+        elif new_name == 'SN15G9':
+            new_name_to_old_name_dict[new_name] = 'SN16G9_SN16G9_N711-S505'
+            old_to_search.remove('SN16G9_SN16G9_N711-S505')
+        elif new_name == 'FS15SE8':
+            new_name_to_old_name_dict[new_name] = 'FS15SE8_FS15SE8_N702-S503'
+            old_to_search.remove('FS15SE8_FS15SE8_N702-S503')
+        elif new_name == 'SN15G2':
+            new_name_to_old_name_dict[new_name] = 'M-17_3688_SN25G2'
+            old_to_search.remove('M-17_3688_SN25G2')
+        elif new_name == 'T1PC4':
+            new_name_to_old_name_dict[new_name] = 'M-17_3697_TIPC4'
+            old_to_search.remove('M-17_3697_TIPC4')
 
     def _populate_clade_dist_df_dict(self, cct_specific=False):
         """If cct_specific is set then we are making dfs for the distance matrices that are from the bespoke
@@ -151,7 +290,14 @@ class RestrepoAnalysis:
         # read in df
         df = pd.read_csv(filepath_or_buffer=self.profile_rel_abund_ouput_path, sep='\t', header=None)
         # collect sample uid to name info
-        self.smp_uid_to_name_dict = {uid: name for uid, name in zip(df[0][7:-12], df[1][7:-12])}
+        index_list = df.index.values.tolist()
+        for i in range(len(index_list)):
+            if 'Sequence accession' in str(df.iloc[i, 0]):
+                # then this is the first row to get rid of
+                index_to_cut_from = i
+                break
+        self.smp_uid_to_name_dict = {int(uid): name for uid, name in zip(df[0][7:index_to_cut_from], df[1][7:index_to_cut_from])}
+        self.smp_name_to_uid_dict = {name: uid for uid, name in self.smp_uid_to_name_dict.items()}
         # del smp name column
         df.drop(columns=1, inplace=True)
         # reset df col headers
@@ -415,8 +561,8 @@ if __name__ == "__main__":
         clade_D_dist_cct_specific_path=os.path.join(
             'cct_specific_between_profile_distances', '2019-04-16_08-37-52_564623','between_profiles','D',
             '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_D.dist'),
-        ignore_cache=True)
-    rest_analysis.create_profile_df_with_cutoff()
+        meta_data_indput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/meta_info.csv',
+        ignore_cache=True, cutoff_abund=0.06)
     rest_analysis.make_dendogram(cct_specific=True)
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
