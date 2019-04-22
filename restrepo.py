@@ -39,7 +39,7 @@ Assess why the UniFrac distance approximation is not working so well
 import os
 import pandas as pd
 import matplotlib as mpl
-mpl.use('TKAgg')
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.cluster.hierarchy
 import scipy.spatial.distance
@@ -362,15 +362,15 @@ class RestrepoAnalysis:
         https://matplotlib.org/users/transforms_tutorial.html
         """
 
-        fig = plt.figure(figsize=(6, 8))
+        fig = plt.figure(figsize=(6, 6))
         # required for getting the bbox of the text annotations
         fig.canvas.draw()
 
         apples = 'asdf'
-        dendro_height = 20
-        label_height = 12
+        dendro_height = 6
+        label_height = 6
         meta_height = 1
-        num_meta = 5
+        num_meta = 4
         total_plot_height = dendro_height + label_height + (num_meta * meta_height)
         for clade in self.clades:
             self._make_dendro_with_meta_fig_for_clade(clade, dendro_height, label_height, total_plot_height)
@@ -384,7 +384,7 @@ class RestrepoAnalysis:
         dendro_info = self._make_dendrogram_figure(
             clade=clade, ax=dend_ax, dist_df=self.clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
-        dend_ax.set_ylabel('BrayCurtis distance')
+        dend_ax.set_ylabel('BrayCurtis distance', fontsize='small', fontweight='bold')
 
         # get the uids in order for the profiles in the dendrogram
         ordered_prof_uid_list = []
@@ -432,8 +432,7 @@ class RestrepoAnalysis:
             list_of_smpl_uids = profile_uid_to_sample_uid_list_dict
 
 
-        print('Saving image')
-        plt.savefig('here.png', dpi=1200)
+
 
     def _plot_labels_plot_for_dendro_and_meta_fig(self, dend_ax, dendro_info, labels_ax):
         # make the x axis limits of the labels plot exactly the same as the dendrogram plot
@@ -496,7 +495,7 @@ class RestrepoAnalysis:
             # fig.canvas.draw()
             annotation_list.append(
                 labels_ax.annotate(s=lab_str, xy=(x_loc, 0.5), rotation='vertical', horizontalalignment='center',
-                                   verticalalignment='center', fontsize='x-small', fontweight='bold'))
+                                   verticalalignment='center', fontsize='xx-small', fontweight='bold'))
         return annotation_list
 
     def _setup_grid_spec_and_axes_for_dendro_and_meta_fig(self, dendro_height, label_height, total_plot_height):
@@ -721,8 +720,17 @@ class MetaInfoPlotter:
         self.ordered_prof_uid_list = ordered_uid_list
         self.meta_axarr = meta_axarr
         # set the x axis lims to match the dend_ax
-        for ax in self.meta_axarr:
+        for ax, label in zip(self.meta_axarr, ['Species', 'Depth', 'Reef Type', 'Season']):
             ax.set_xlim(dend_ax.get_xlim())
+            ax.spines['top'].set_visible(False)
+            ax.spines['bottom'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_ylim((0, 1))
+            ax.set_ylabel(label, rotation='horizontal', fontweight='bold', fontsize='x-small', labelpad=30,
+                               verticalalignment='center')
         self.prof_uid_to_smpl_uid_list_dict = prof_uid_to_smpl_uid_list_dict
         self.prof_uid_to_x_loc_dict = prof_uid_to_x_loc_dict
         self.smpl_meta_df = self.parent_analysis.metadata_info_df
@@ -738,6 +746,8 @@ class MetaInfoPlotter:
         # Plot species, season, depth, reef type
         self.species_plotter.plot()
 
+
+
     class SpeciesPlotter:
         def __init__(self, parent_meta_plotter, ax):
             self.parent_meta_plotter = parent_meta_plotter
@@ -746,6 +756,7 @@ class MetaInfoPlotter:
             self.prof_x_loc_dict = self.parent_meta_plotter.prof_uid_to_x_loc_dict
             self.meta_df = self.parent_meta_plotter.smpl_meta_df
             self.ax = ax
+            self.species_list = ['G', 'GX', 'M', 'P', 'PC', 'SE', 'ST']
             self.color_dict = {
                 'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
                 'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
@@ -758,13 +769,15 @@ class MetaInfoPlotter:
             self.meta_box_height = self.parent_meta_plotter.meta_box_height
 
         def plot(self):
-            self.ax.spines['top'].set_visible(False)
-            self.ax.spines['bottom'].set_visible(False)
-            self.ax.spines['right'].set_visible(False)
-            self.ax.spines['left'].set_visible(False)
-            self.ax.set_xticks([])
-            self.ax.set_yticks([])
-            self.ax.set_ylabel('Species', rotation='horizontal', fontweight='bold')
+            # self.ax.spines['top'].set_visible(False)
+            # self.ax.spines['bottom'].set_visible(False)
+            # self.ax.spines['right'].set_visible(False)
+            # self.ax.spines['left'].set_visible(False)
+            # self.ax.set_xticks([])
+            # self.ax.set_yticks([])
+            # self.ax.set_ylim((0,1))
+            # # self.ax.annotate(s='Species', xy=(20, 0.5), xycoords='data', verticalalignment='center', horizontalalignment='left', rotation='horizontal', fontweight='bold')
+            # self.ax.set_ylabel('Species', rotation='horizontal', fontweight='bold', fontsize='small', labelpad=30, verticalalignment='center')
             for prof_uid in self.prof_uid_list:
                 list_of_sample_uids = self.prof_uid_to_smpl_uid_list_dict[prof_uid]
                 list_of_species_of_smpls = [self.meta_df.at[smpl_uid, 'species'] for smpl_uid in list_of_sample_uids]
@@ -772,48 +785,47 @@ class MetaInfoPlotter:
                 counter = Counter(list_of_species_of_smpls)
                 counts_list_for_eveness_calc = [count_tup[1] for count_tup in counter.items()]
                 eveness = skbio.diversity.alpha.simpson(counts_list_for_eveness_calc)
-                if eveness == 0:
-                    # Then this only contains the one species and it should simply be the species color
-                    data_x0, data_y0, rect_height, rect_width = self._get_rect_dims(prof_uid)
-                    # draw the rectangle on the axis
-                    rect_color = self._get_rect_color_one_species(list_of_species_of_smpls)
+                if eveness > 0:
+                    apples = 'asdf'
+                """ Rather than plot this as a single colour and grey when there is a mix, I want to see
+                what it will look like then I plot it as a horizontal bar graph."""
 
-                    self._make_and_draw_rect_patch_on_ax(data_x0, data_y0, rect_color, rect_height, rect_width)
+                # Then this only contains the one species and it should simply be the species color
+                x0_list, y0_list, width_list, height_list = self._get_rect_attributes(prof_uid, counter)
 
-                else:
-                    # need to scale the grey to the eveness score and then
-                    data_x0, data_y0, rect_height, rect_width = self._get_rect_dims(prof_uid)
+                for x, y, w, h, s in zip(x0_list, y0_list, width_list, height_list, self.species_list):
+                    if w > 0:
+                        rect_p = patches.Rectangle(
+                            xy=(x, y), width=w, height=h, facecolor=self.color_dict[s], edgecolor='none')
+                        self.ax.add_patch(rect_p)
 
-                    # now get the colour according to eveness scaling
-                    rect_color = (1-eveness, 1-eveness, 1-eveness)
-
-                    self._make_and_draw_rect_patch_on_ax(data_x0, data_y0, rect_color, rect_height, rect_width)
+            print('Saving image')
+            plt.savefig('here.png', dpi=1200)
             apples = 'asdf'
 
 
-        def _make_and_draw_rect_patch_on_ax(self, data_x0, data_y0, rect_color, rect_height, rect_width):
-            rect_p = patches.Rectangle(
-                xy=(data_x0, data_y0), width=rect_width, height=rect_height, color=rect_color)
-            self.ax.add_patch(rect_p)
+        def _get_rect_attributes(self, prof_uid, counter):
 
-        def _get_rect_color_one_species(self, list_of_species_of_smpls):
-            rect_color = self.color_dict[list_of_species_of_smpls[0]]
-            return rect_color
+            num_species = len(self.color_dict.items())
 
-        def _get_rect_dims(self, prof_uid):
-            # We want to draw a squre box to represent the info, the hieght of this box will be determined
-            # by the width of the box. The width of the box will need to be calculated from the buffer
-            # between the meta info boxes and the location of the boxes
-            # Let's simplify this for sake of time and go with a hardcoded height for the box
+            bar_height = (1/(num_species))
+            y0_list = [i * bar_height for i in range(num_species)]
+            height_list = [bar_height for _ in range(num_species)]
+
             x_loc_of_prof = self.prof_x_loc_dict[prof_uid]
             data_x0 = (x_loc_of_prof - (self.dist_betwee_x_locs / 2)) + self.meta_box_buffer
             data_x1 = (x_loc_of_prof + (self.dist_betwee_x_locs / 2)) - self.meta_box_buffer
-            y_halfway = (self.ax.get_ylim()[0] + self.ax.get_ylim()[1]) / 2
-            data_y0 = y_halfway - (self.meta_box_height / 2)
-            data_y1 = y_halfway + (self.meta_box_height / 2)
             rect_width = data_x1 - data_x0
-            rect_height = data_y1 - data_y0
-            return data_x0, data_y0, rect_height, rect_width
+
+            width_list = []
+            num_samples = sum(counter.values())
+            for species in self.species_list:
+                if species in counter:
+                    width_list.append((counter[species]/num_samples)*rect_width)
+                else:
+                    width_list.append(0)
+            x0_list = [data_x0 for _ in range(num_species)]
+            return x0_list, y0_list, width_list, height_list
 
 
 if __name__ == "__main__":
