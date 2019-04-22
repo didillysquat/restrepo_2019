@@ -367,24 +367,31 @@ class RestrepoAnalysis:
         fig.canvas.draw()
 
         apples = 'asdf'
-        dendro_height = 6
-        label_height = 6
-        meta_height = 1
-        num_meta = 4
-        total_plot_height = dendro_height + label_height + (num_meta * meta_height)
+        # order: dendro, label, species, depth, reef_type, season
+        list_of_heights = [18,18,7,3,3,2]
+        # dendro_height = 18
+        # label_height = 18
+        # species_height = 7
+        # depth_height = 3
+        # reef_type_height = 3
+        # season_height = 2
+        # num_meta = 4
+        total_plot_height = sum(list_of_heights)
         for clade in self.clades:
-            self._make_dendro_with_meta_fig_for_clade(clade, dendro_height, label_height, total_plot_height)
+            self._make_dendro_with_meta_fig_for_clade(clade, list_of_heights)
 
-    def _make_dendro_with_meta_fig_for_clade(self, clade, dendro_height, label_height, total_plot_height):
-        dend_ax, labels_ax, meta_axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig(dendro_height, label_height,
-                                                                                    total_plot_height)
+    def _make_dendro_with_meta_fig_for_clade(self, clade, list_of_heights):
+        axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig(list_of_heights)
 
 
         # Plot the dendrogram in first axes
         dendro_info = self._make_dendrogram_figure(
-            clade=clade, ax=dend_ax, dist_df=self.clade_dist_cct_specific_df_dict[clade],
+            clade=clade, ax=axarr[0], dist_df=self.clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
-        dend_ax.set_ylabel('BrayCurtis distance', fontsize='small', fontweight='bold')
+        axarr[0].set_ylabel('BrayCurtis distance', fontsize='x-small', fontweight='bold')
+        axarr[0].spines['top'].set_visible(False)
+        axarr[0].spines['right'].set_visible(False)
+        axarr[0].spines['left'].set_visible(False)
 
         # get the uids in order for the profiles in the dendrogram
         ordered_prof_uid_list = []
@@ -395,12 +402,8 @@ class RestrepoAnalysis:
             prof_uid_to_x_loc_dict[temp_uid] = x_loc
 
         # Plot labels in second axes
-        self._plot_labels_plot_for_dendro_and_meta_fig(dend_ax, dendro_info, labels_ax)
-        labels_ax.set_ylabel('ITS2 type profile name')
-
-
-
-
+        self._plot_labels_plot_for_dendro_and_meta_fig(axarr[0], dendro_info, axarr[1])
+        axarr[1].set_ylabel('ITS2 type profile name')
 
 
         # for each ITS2 type profile we will need to get the samples that the profile was found in
@@ -421,17 +424,19 @@ class RestrepoAnalysis:
             profile_uid_to_sample_uid_list_dict[prof_uid].extend(non_zero_indices)
 
         # we will work with a class for doing the mata plotting as it will be quite involved
-        mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=meta_axarr,
+        mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[2:],
                               prof_uid_to_smpl_uid_list_dict=profile_uid_to_sample_uid_list_dict,
-                              prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=dend_ax)
+                              prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=axarr[0])
         mip.plot_species_meta()
+        mip.plot_depth_meta()
+        mip.plot_reef_type()
+        mip.plot_season()
 
-
+        print('Saving image')
+        plt.savefig('here.png', dpi=1200)
         # evenness can be calculated using skbio.diversity.alpha.simpson
         for profile_uid in ordered_prof_uid_list:
             list_of_smpl_uids = profile_uid_to_sample_uid_list_dict
-
-
 
 
     def _plot_labels_plot_for_dendro_and_meta_fig(self, dend_ax, dendro_info, labels_ax):
@@ -498,16 +503,14 @@ class RestrepoAnalysis:
                                    verticalalignment='center', fontsize='xx-small', fontweight='bold'))
         return annotation_list
 
-    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig(self, dendro_height, label_height, total_plot_height):
-        gs = gridspec.GridSpec(total_plot_height, 1)
-        # dendrogram axis
-        dend_ax = plt.subplot(gs[0:dendro_height, 0:1])
-        # labels ax
-        labels_ax = plt.subplot(gs[dendro_height:dendro_height + label_height, 0:1])
-        meta_axes_list = []
-        for i in range(dendro_height + label_height, total_plot_height, 1):
-            meta_axes_list.append(plt.subplot(gs[i:i + 1, 0:1]))
-        return dend_ax, labels_ax, meta_axes_list
+    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig(self, list_of_heights):
+        gs = gridspec.GridSpec(sum(list_of_heights), 1)
+
+        axarr = []
+        for i in range(len(list_of_heights)):
+            axarr.append(plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), 0:1]))
+
+        return axarr
 
     def make_dendrogram(self, cct_specific=False):
         """I have modified the scipi.cluster.hierarchy.dendrogram so that it can take a line thickness dictionary.
@@ -722,8 +725,8 @@ class MetaInfoPlotter:
         # set the x axis lims to match the dend_ax
         for ax, label in zip(self.meta_axarr, ['Species', 'Depth', 'Reef Type', 'Season']):
             ax.set_xlim(dend_ax.get_xlim())
-            ax.spines['top'].set_visible(False)
-            ax.spines['bottom'].set_visible(False)
+            # ax.spines['top'].set_visible(False)
+            # ax.spines['bottom'].set_visible(False)
             ax.spines['right'].set_visible(False)
             ax.spines['left'].set_visible(False)
             ax.set_xticks([])
@@ -740,16 +743,44 @@ class MetaInfoPlotter:
         self.meta_box_height = 0.8
 
         # species
+        self.species_plotter = None
+        self.depth_plotter = None
+        self.reef_type_plotter = None
+        self.season = None
+
+    def plot_species_meta(self):
+        # Plot species, season, depth, reef type
         color_dict = {
             'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
             'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
         category_list = ['G', 'GX', 'M', 'P', 'PC', 'SE', 'ST']
-        self.species_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0], color_dict=color_dict, category_list=category_list, category_df_header='species')
-
-    def plot_species_meta(self):
-        # Plot species, season, depth, reef type
+        self.species_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0], color_dict=color_dict,
+                                               category_list=category_list, category_df_header='species')
         self.species_plotter.plot()
 
+    def plot_depth_meta(self):
+        color_dict = {
+            1:'#CAE1FF', 15: '#2E37FE', 30: '#000080'}
+        category_list = [30, 15, 1]
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[1], color_dict=color_dict,
+                                               category_list=category_list, category_df_header='depth')
+        self.depth_plotter.plot()
+
+    def plot_reef_type(self):
+        color_dict = {
+            'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000'}
+        category_list = ['Offshore', 'Midshelf', 'Inshore']
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], color_dict=color_dict,
+                                             category_list=category_list, category_df_header='reef_type')
+        self.depth_plotter.plot()
+
+    def plot_season(self):
+        color_dict = {
+            'Summer': '#FF0000', 'Winter': '#00BFFF'}
+        category_list = ['Summer', 'Winter']
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], color_dict=color_dict,
+                                             category_list=category_list, category_df_header='season')
+        self.depth_plotter.plot()
 
     class CatPlotter:
         def __init__(self, parent_meta_plotter, ax, color_dict, category_list, category_df_header):
@@ -787,8 +818,7 @@ class MetaInfoPlotter:
                             xy=(x, y), width=w, height=h, facecolor=self.color_dict[s], edgecolor='none')
                         self.ax.add_patch(rect_p)
 
-            print('Saving image')
-            plt.savefig('here.png', dpi=1200)
+
 
 
         def _get_rect_attributes(self, prof_uid, counter):
