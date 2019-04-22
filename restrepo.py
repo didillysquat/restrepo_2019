@@ -740,26 +740,25 @@ class MetaInfoPlotter:
         self.meta_box_height = 0.8
 
         # species
-        self.species_plotter = self.SpeciesPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0])
+        color_dict = {
+            'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
+            'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
+        category_list = ['G', 'GX', 'M', 'P', 'PC', 'SE', 'ST']
+        self.species_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0], color_dict=color_dict, category_list=category_list, category_df_header='species')
 
     def plot_species_meta(self):
         # Plot species, season, depth, reef type
         self.species_plotter.plot()
 
 
-
-    class SpeciesPlotter:
-        def __init__(self, parent_meta_plotter, ax):
+    class CatPlotter:
+        def __init__(self, parent_meta_plotter, ax, color_dict, category_list, category_df_header):
             self.parent_meta_plotter = parent_meta_plotter
             self.prof_uid_list = self.parent_meta_plotter.ordered_prof_uid_list
             self.prof_uid_to_smpl_uid_list_dict = self.parent_meta_plotter.prof_uid_to_smpl_uid_list_dict
             self.prof_x_loc_dict = self.parent_meta_plotter.prof_uid_to_x_loc_dict
             self.meta_df = self.parent_meta_plotter.smpl_meta_df
             self.ax = ax
-            self.species_list = ['G', 'GX', 'M', 'P', 'PC', 'SE', 'ST']
-            self.color_dict = {
-                'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
-                'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
             x_loc_one = self.prof_x_loc_dict[self.prof_uid_list[0]]
             x_loc_two = self.prof_x_loc_dict[self.prof_uid_list[1]]
             self.dist_betwee_x_locs = x_loc_two - x_loc_one
@@ -767,33 +766,22 @@ class MetaInfoPlotter:
             # this should be set dynmaically at some point rather than hard coded
             self.meta_box_buffer = self.parent_meta_plotter.meta_box_buffer
             self.meta_box_height = self.parent_meta_plotter.meta_box_height
+            self.color_dict = color_dict
+            self.category_list = category_list
+            self.category_df_header = category_df_header
 
         def plot(self):
-            # self.ax.spines['top'].set_visible(False)
-            # self.ax.spines['bottom'].set_visible(False)
-            # self.ax.spines['right'].set_visible(False)
-            # self.ax.spines['left'].set_visible(False)
-            # self.ax.set_xticks([])
-            # self.ax.set_yticks([])
-            # self.ax.set_ylim((0,1))
-            # # self.ax.annotate(s='Species', xy=(20, 0.5), xycoords='data', verticalalignment='center', horizontalalignment='left', rotation='horizontal', fontweight='bold')
-            # self.ax.set_ylabel('Species', rotation='horizontal', fontweight='bold', fontsize='small', labelpad=30, verticalalignment='center')
+            """We will plot a horizontal bar plot using rectangle patches"""
             for prof_uid in self.prof_uid_list:
                 list_of_sample_uids = self.prof_uid_to_smpl_uid_list_dict[prof_uid]
-                list_of_species_of_smpls = [self.meta_df.at[smpl_uid, 'species'] for smpl_uid in list_of_sample_uids]
+                list_of_cat_instances = [self.meta_df.at[smpl_uid, self.category_df_header] for smpl_uid in list_of_sample_uids]
                 # calculate eveness
-                counter = Counter(list_of_species_of_smpls)
-                counts_list_for_eveness_calc = [count_tup[1] for count_tup in counter.items()]
-                eveness = skbio.diversity.alpha.simpson(counts_list_for_eveness_calc)
-                if eveness > 0:
-                    apples = 'asdf'
-                """ Rather than plot this as a single colour and grey when there is a mix, I want to see
-                what it will look like then I plot it as a horizontal bar graph."""
+                counter = Counter(list_of_cat_instances)
 
                 # Then this only contains the one species and it should simply be the species color
                 x0_list, y0_list, width_list, height_list = self._get_rect_attributes(prof_uid, counter)
 
-                for x, y, w, h, s in zip(x0_list, y0_list, width_list, height_list, self.species_list):
+                for x, y, w, h, s in zip(x0_list, y0_list, width_list, height_list, self.category_list):
                     if w > 0:
                         rect_p = patches.Rectangle(
                             xy=(x, y), width=w, height=h, facecolor=self.color_dict[s], edgecolor='none')
@@ -801,16 +789,15 @@ class MetaInfoPlotter:
 
             print('Saving image')
             plt.savefig('here.png', dpi=1200)
-            apples = 'asdf'
 
 
         def _get_rect_attributes(self, prof_uid, counter):
 
-            num_species = len(self.color_dict.items())
+            num_categories = len(self.color_dict.items())
 
-            bar_height = (1/(num_species))
-            y0_list = [i * bar_height for i in range(num_species)]
-            height_list = [bar_height for _ in range(num_species)]
+            bar_height = (1/(num_categories))
+            y0_list = [i * bar_height for i in range(num_categories)]
+            height_list = [bar_height for _ in range(num_categories)]
 
             x_loc_of_prof = self.prof_x_loc_dict[prof_uid]
             data_x0 = (x_loc_of_prof - (self.dist_betwee_x_locs / 2)) + self.meta_box_buffer
@@ -819,12 +806,12 @@ class MetaInfoPlotter:
 
             width_list = []
             num_samples = sum(counter.values())
-            for species in self.species_list:
-                if species in counter:
-                    width_list.append((counter[species]/num_samples)*rect_width)
+            for cat in self.category_list:
+                if cat in counter:
+                    width_list.append((counter[cat]/num_samples)*rect_width)
                 else:
                     width_list.append(0)
-            x0_list = [data_x0 for _ in range(num_species)]
+            x0_list = [data_x0 for _ in range(num_categories)]
             return x0_list, y0_list, width_list, height_list
 
 
