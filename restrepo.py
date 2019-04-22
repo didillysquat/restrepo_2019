@@ -39,7 +39,7 @@ Assess why the UniFrac distance approximation is not working so well
 import os
 import pandas as pd
 import matplotlib as mpl
-mpl.use('Agg')
+mpl.use('TKAgg')
 import matplotlib.pyplot as plt
 import scipy.cluster.hierarchy
 import scipy.spatial.distance
@@ -47,7 +47,10 @@ import numpy as np
 import hierarchy_sp
 import pickle
 import matplotlib.gridspec as gridspec
-from matplotlib import collections
+from matplotlib import collections, patches
+from collections import defaultdict, Counter
+import skbio.diversity.alpha
+
 
 class RestrepoAnalysis:
     def __init__(self, base_input_dir, profile_rel_abund_ouput_path, profile_abs_abund_ouput_path,
@@ -92,6 +95,7 @@ class RestrepoAnalysis:
         self.prof_uid_to_local_abund_dict_post_cutoff = {}
         self.prof_uid_to_global_abund_dict = None
         self.prof_uid_to_name_dict = None
+        self.prof_name_to_uid_dict = None
         self.clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict()
         self.clade_dist_cct_specific_df_dict = {}
@@ -167,15 +171,15 @@ class RestrepoAnalysis:
 
         We should therefore probably delete this sample from the profiles and smpls df.
         """
-        mata_info_df = pd.DataFrame.from_csv(meta_info_path)
+        meta_info_df = pd.DataFrame.from_csv(meta_info_path)
         # The same names in the meta info are different from those in the SymPortal output.
         # parse through the meta info names and make sure theat they are found in only one of the SP output names
         # then, we can simply modify the sample uid to name dictionary (or better make a new one)
         new_name_to_old_name_dict = {}
         old_to_search = list(self.smp_uid_to_name_dict.values())
-        len_new = len(mata_info_df.index.values.tolist())
+        len_new = len(meta_info_df.index.values.tolist())
         len_old = len(old_to_search)
-        for new_name in mata_info_df.index.values.tolist():
+        for new_name in meta_info_df.index.values.tolist():
             if new_name in ['Q15G6', 'Q15G7', 'SN15G10', 'SN15G6', 'SN15G7', 'SN15G8', 'SN15G9', 'FS15SE8', 'SN15G2', 'T1PC4']:
                 self._add_new_name_to_old_name_entry_manually(new_name, new_name_to_old_name_dict, old_to_search)
             else:
@@ -204,11 +208,12 @@ class RestrepoAnalysis:
         # mata info sample names in relation to the SP outputs. And use these uids as index rather than the meta info
         # names
         new_uid_index = []
-        for new_name in mata_info_df.index.values.tolist():
+        for new_name in meta_info_df.index.values.tolist():
             new_uid_index.append(int(self.smp_name_to_uid_dict[new_name_to_old_name_dict[new_name]]))
 
-        mata_info_df.index = new_uid_index
-        return mata_info_df
+        meta_info_df.index = new_uid_index
+        meta_info_df.columns = ['reef', 'reef_type', 'depth', 'species', 'season']
+        return meta_info_df
 
 
         apples = 'asdf'
@@ -309,6 +314,7 @@ class RestrepoAnalysis:
         self.prof_uid_to_local_abund_dict = {int(uid): int(abund) for uid, abund in zip(df.iloc[0,1:], df.iloc[4,1:])}
         self.prof_uid_to_global_abund_dict = {int(uid): int(abund) for uid, abund in zip(df.iloc[0,1:], df.iloc[5,1:])}
         self.prof_uid_to_name_dict = {int(uid): name for uid, name in zip(df.iloc[0,1:], df.iloc[6,1:])}
+        self.prof_name_to_uid_dict = {name: uid for uid, name in self.prof_uid_to_name_dict.items()}
         # drop meta info except for prof uid
         # top
         df.drop(index=range(1,7), inplace=True)
@@ -370,14 +376,61 @@ class RestrepoAnalysis:
             self._make_dendro_with_meta_fig_for_clade(clade, dendro_height, label_height, total_plot_height)
 
     def _make_dendro_with_meta_fig_for_clade(self, clade, dendro_height, label_height, total_plot_height):
-        dend_ax, labels_ax = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig(dendro_height, label_height,
+        dend_ax, labels_ax, meta_axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig(dendro_height, label_height,
                                                                                     total_plot_height)
+
+
         # Plot the dendrogram in first axes
         dendro_info = self._make_dendrogram_figure(
             clade=clade, ax=dend_ax, dist_df=self.clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
+        dend_ax.set_ylabel('BrayCurtis distance')
 
+        # get the uids in order for the profiles in the dendrogram
+        ordered_prof_uid_list = []
+        prof_uid_to_x_loc_dict = {}
+        for x_loc, lab_str in dendro_info['tick_to_profile_name_dict'].items():
+            temp_uid = self.prof_name_to_uid_dict[lab_str.split(' ')[0]]
+            ordered_prof_uid_list.append(temp_uid)
+            prof_uid_to_x_loc_dict[temp_uid] = x_loc
+
+        # Plot labels in second axes
         self._plot_labels_plot_for_dendro_and_meta_fig(dend_ax, dendro_info, labels_ax)
+        labels_ax.set_ylabel('ITS2 type profile name')
+
+
+
+
+
+
+        # for each ITS2 type profile we will need to get the samples that the profile was found in
+        # then we need to look up each of the samples and see which of the parameters it refers to.
+        # as such that first look up of which samples the profiles were found in can be put into a dict
+        # for use in each of the meta plots.
+        # How to represent the mixed states is a little tricky. I think perhaps we should just use an eveness
+        # index, where a very uneven distribution is light grey (i.e. almost one of the categories and
+        # the more even distribution is closer to black (i.e. more of a mix).
+        # to make the grey code its probably easiest to make an RGB tupple scaling from 255,255,255 which is
+        # white, to 0,0,0 which is black. This would be scaled against the eveness.
+
+        profile_uid_to_sample_uid_list_dict = defaultdict(list)
+        for prof_uid in list(self.prof_df_cutoff):
+            temp_series = self.prof_df_cutoff[prof_uid]
+            temp_series_non_zero_series = temp_series[temp_series > 0]
+            non_zero_indices = temp_series_non_zero_series.index.values.tolist()
+            profile_uid_to_sample_uid_list_dict[prof_uid].extend(non_zero_indices)
+
+        # we will work with a class for doing the mata plotting as it will be quite involved
+        mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=meta_axarr,
+                              prof_uid_to_smpl_uid_list_dict=profile_uid_to_sample_uid_list_dict,
+                              prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=dend_ax)
+        mip.plot_species_meta()
+
+
+        # evenness can be calculated using skbio.diversity.alpha.simpson
+        for profile_uid in ordered_prof_uid_list:
+            list_of_smpl_uids = profile_uid_to_sample_uid_list_dict
+
 
         print('Saving image')
         plt.savefig('here.png', dpi=1200)
@@ -455,7 +508,7 @@ class RestrepoAnalysis:
         meta_axes_list = []
         for i in range(dendro_height + label_height, total_plot_height, 1):
             meta_axes_list.append(plt.subplot(gs[i:i + 1, 0:1]))
-        return dend_ax, labels_ax
+        return dend_ax, labels_ax, meta_axes_list
 
     def make_dendrogram(self, cct_specific=False):
         """I have modified the scipi.cluster.hierarchy.dendrogram so that it can take a line thickness dictionary.
@@ -662,6 +715,106 @@ class RestrepoAnalysis:
 
 
 
+class MetaInfoPlotter:
+    def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_x_loc_dict, dend_ax):
+        self.parent_analysis = parent_analysis
+        self.ordered_prof_uid_list = ordered_uid_list
+        self.meta_axarr = meta_axarr
+        # set the x axis lims to match the dend_ax
+        for ax in self.meta_axarr:
+            ax.set_xlim(dend_ax.get_xlim())
+        self.prof_uid_to_smpl_uid_list_dict = prof_uid_to_smpl_uid_list_dict
+        self.prof_uid_to_x_loc_dict = prof_uid_to_x_loc_dict
+        self.smpl_meta_df = self.parent_analysis.metadata_info_df
+        # the space left between the info boxes of the plot
+        # this should be set dynmaically at some point rather than hard coded
+        self.meta_box_buffer = 1
+        self.meta_box_height = 0.8
+
+        # species
+        self.species_plotter = self.SpeciesPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0])
+
+    def plot_species_meta(self):
+        # Plot species, season, depth, reef type
+        self.species_plotter.plot()
+
+    class SpeciesPlotter:
+        def __init__(self, parent_meta_plotter, ax):
+            self.parent_meta_plotter = parent_meta_plotter
+            self.prof_uid_list = self.parent_meta_plotter.ordered_prof_uid_list
+            self.prof_uid_to_smpl_uid_list_dict = self.parent_meta_plotter.prof_uid_to_smpl_uid_list_dict
+            self.prof_x_loc_dict = self.parent_meta_plotter.prof_uid_to_x_loc_dict
+            self.meta_df = self.parent_meta_plotter.smpl_meta_df
+            self.ax = ax
+            self.color_dict = {
+                'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
+                'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
+            x_loc_one = self.prof_x_loc_dict[self.prof_uid_list[0]]
+            x_loc_two = self.prof_x_loc_dict[self.prof_uid_list[1]]
+            self.dist_betwee_x_locs = x_loc_two - x_loc_one
+            # the space left between the info boxes of the plot
+            # this should be set dynmaically at some point rather than hard coded
+            self.meta_box_buffer = self.parent_meta_plotter.meta_box_buffer
+            self.meta_box_height = self.parent_meta_plotter.meta_box_height
+
+        def plot(self):
+            self.ax.spines['top'].set_visible(False)
+            self.ax.spines['bottom'].set_visible(False)
+            self.ax.spines['right'].set_visible(False)
+            self.ax.spines['left'].set_visible(False)
+            self.ax.set_xticks([])
+            self.ax.set_yticks([])
+            self.ax.set_ylabel('Species', rotation='horizontal', fontweight='bold')
+            for prof_uid in self.prof_uid_list:
+                list_of_sample_uids = self.prof_uid_to_smpl_uid_list_dict[prof_uid]
+                list_of_species_of_smpls = [self.meta_df.at[smpl_uid, 'species'] for smpl_uid in list_of_sample_uids]
+                # calculate eveness
+                counter = Counter(list_of_species_of_smpls)
+                counts_list_for_eveness_calc = [count_tup[1] for count_tup in counter.items()]
+                eveness = skbio.diversity.alpha.simpson(counts_list_for_eveness_calc)
+                if eveness == 0:
+                    # Then this only contains the one species and it should simply be the species color
+                    data_x0, data_y0, rect_height, rect_width = self._get_rect_dims(prof_uid)
+                    # draw the rectangle on the axis
+                    rect_color = self._get_rect_color_one_species(list_of_species_of_smpls)
+
+                    self._make_and_draw_rect_patch_on_ax(data_x0, data_y0, rect_color, rect_height, rect_width)
+
+                else:
+                    # need to scale the grey to the eveness score and then
+                    data_x0, data_y0, rect_height, rect_width = self._get_rect_dims(prof_uid)
+
+                    # now get the colour according to eveness scaling
+                    rect_color = (1-eveness, 1-eveness, 1-eveness)
+
+                    self._make_and_draw_rect_patch_on_ax(data_x0, data_y0, rect_color, rect_height, rect_width)
+            apples = 'asdf'
+
+
+        def _make_and_draw_rect_patch_on_ax(self, data_x0, data_y0, rect_color, rect_height, rect_width):
+            rect_p = patches.Rectangle(
+                xy=(data_x0, data_y0), width=rect_width, height=rect_height, color=rect_color)
+            self.ax.add_patch(rect_p)
+
+        def _get_rect_color_one_species(self, list_of_species_of_smpls):
+            rect_color = self.color_dict[list_of_species_of_smpls[0]]
+            return rect_color
+
+        def _get_rect_dims(self, prof_uid):
+            # We want to draw a squre box to represent the info, the hieght of this box will be determined
+            # by the width of the box. The width of the box will need to be calculated from the buffer
+            # between the meta info boxes and the location of the boxes
+            # Let's simplify this for sake of time and go with a hardcoded height for the box
+            x_loc_of_prof = self.prof_x_loc_dict[prof_uid]
+            data_x0 = (x_loc_of_prof - (self.dist_betwee_x_locs / 2)) + self.meta_box_buffer
+            data_x1 = (x_loc_of_prof + (self.dist_betwee_x_locs / 2)) - self.meta_box_buffer
+            y_halfway = (self.ax.get_ylim()[0] + self.ax.get_ylim()[1]) / 2
+            data_y0 = y_halfway - (self.meta_box_height / 2)
+            data_y1 = y_halfway + (self.meta_box_height / 2)
+            rect_width = data_x1 - data_x0
+            rect_height = data_y1 - data_y0
+            return data_x0, data_y0, rect_height, rect_width
+
 
 if __name__ == "__main__":
     rest_analysis = RestrepoAnalysis(
@@ -695,3 +848,9 @@ if __name__ == "__main__":
     rest_analysis.make_dendrogram_with_meta()
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
+
+
+
+
+
+
