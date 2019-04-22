@@ -39,7 +39,7 @@ Assess why the UniFrac distance approximation is not working so well
 import os
 import pandas as pd
 import matplotlib as mpl
-mpl.use('Agg')
+mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 import scipy.cluster.hierarchy
 import scipy.spatial.distance
@@ -341,8 +341,7 @@ class RestrepoAnalysis:
         df.index = df.index.astype('int')
         self.profile_df = df
 
-
-    def make_dendrogram_with_meta(self):
+    def make_dendrogram_with_meta_all_clades(self):
         """This function will make a figure that has a dendrogram at the top, the labels under that, then
         under this it will have data that link the metainfo to each of the types found.
         NB, I have modified the returned dictionary from hierarchy_sp.dendrogram_sp so that it contains the
@@ -362,7 +361,93 @@ class RestrepoAnalysis:
         https://matplotlib.org/users/transforms_tutorial.html
         """
 
-        fig = plt.figure(figsize=(6, 6))
+        fig = plt.figure(figsize=(20, 6))
+        # required for getting the bbox of the text annotations
+        fig.canvas.draw()
+
+        apples = 'asdf'
+        # order: dendro, label, species, depth, reef_type, season
+        list_of_heights = [18,18,7,3,3,2]
+        axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(list_of_heights)
+        for i in range(len(self.clades)):
+            self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr)
+
+    def _make_dendrogram_with_meta_fig_for_all_clades(self, clade_index, axarr):
+        clade = self.clades[clade_index]
+        # Plot the dendrogram in first axes
+        dendro_info = self._make_dendrogram_figure(
+            clade=clade, ax=axarr[clade_index + 1][0], dist_df=self.clade_dist_cct_specific_df_dict[clade],
+            local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
+        axarr[clade_index + 1][0].set_yticks([0.0, 1.0])
+        self._remove_spines_from_dendro(axarr[clade_index + 1], clade_index=clade_index)
+
+        # get the uids in order for the profiles in the dendrogram
+        ordered_prof_uid_list = []
+        prof_uid_to_x_loc_dict = {}
+        for x_loc, lab_str in dendro_info['tick_to_profile_name_dict'].items():
+            temp_uid = self.prof_name_to_uid_dict[lab_str.split(' ')[0]]
+            ordered_prof_uid_list.append(temp_uid)
+            prof_uid_to_x_loc_dict[temp_uid] = x_loc
+
+        # Plot labels in second axes
+        self._plot_labels_plot_for_dendro_and_meta_fig(axarr[clade_index + 1][0], dendro_info, axarr[clade_index + 1][1])
+        if clade_index == 0:
+            axarr[clade_index + 1][1].set_ylabel('ITS2 type profile name', fontsize='x-small', fontweight='bold', labelpad=18)
+
+
+        # for each ITS2 type profile we will need to get the samples that the profile was found in
+        # then we need to look up each of the samples and see which of the parameters it refers to.
+        # as such that first look up of which samples the profiles were found in can be put into a dict
+        # for use in each of the meta plots.
+        # How to represent the mixed states is a little tricky. I think perhaps we should just use an eveness
+        # index, where a very uneven distribution is light grey (i.e. almost one of the categories and
+        # the more even distribution is closer to black (i.e. more of a mix).
+        # to make the grey code its probably easiest to make an RGB tupple scaling from 255,255,255 which is
+        # white, to 0,0,0 which is black. This would be scaled against the eveness.
+
+        profile_uid_to_sample_uid_list_dict = defaultdict(list)
+        for prof_uid in list(self.prof_df_cutoff):
+            temp_series = self.prof_df_cutoff[prof_uid]
+            temp_series_non_zero_series = temp_series[temp_series > 0]
+            non_zero_indices = temp_series_non_zero_series.index.values.tolist()
+            profile_uid_to_sample_uid_list_dict[prof_uid].extend(non_zero_indices)
+
+        # we will work with a class for doing the mata plotting as it will be quite involved
+        mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[clade_index + 1][2:],
+                              prof_uid_to_smpl_uid_list_dict=profile_uid_to_sample_uid_list_dict,
+                              prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=axarr[clade_index + 1][0], sub_cat_axarr=axarr[clade_index][2:], clade_index=clade_index)
+        mip.plot_species_meta()
+        mip.plot_depth_meta()
+        mip.plot_reef_type()
+        mip.plot_season()
+
+        print('Saving image')
+        plt.savefig('here.png', dpi=1200)
+        # evenness can be calculated using skbio.diversity.alpha.simpson
+        for profile_uid in ordered_prof_uid_list:
+            list_of_smpl_uids = profile_uid_to_sample_uid_list_dict
+
+    def make_dendrogram_with_meta_per_clade(self):
+        """This function will make a figure that has a dendrogram at the top, the labels under that, then
+        under this it will have data that link the metainfo to each of the types found.
+        NB, I have modified the returned dictionary from hierarchy_sp.dendrogram_sp so that it contains the
+        tick_to_profile_name_dict that we can use to easily associate the label that should be plotted in the
+        labels plot.
+
+        NB we are having some problems with properly getting the bounding box coordinates of the labels during TkAgg
+        rendering, i.e. interactive redering during debug. However it works find during actual running of the code
+        using the Agg backend.
+
+        NB getting the bounding boxes for the annoations is quite involved.
+        It basically involves calling get_window_extent() on the annotation object. This will give you a bbox object
+        which has its units in display units. You then have to transform this back to data units.
+        This link for getting the bbox from the annotation:
+        https://matplotlib.org/api/text_api.html#matplotlib.text.Annotation.get_window_extent
+        This link for doing the transofrmations into the correct coordinates space:
+        https://matplotlib.org/users/transforms_tutorial.html
+        """
+
+        fig = plt.figure(figsize=(5, 6))
         # required for getting the bbox of the text annotations
         fig.canvas.draw()
 
@@ -386,12 +471,10 @@ class RestrepoAnalysis:
 
         # Plot the dendrogram in first axes
         dendro_info = self._make_dendrogram_figure(
-            clade=clade, ax=axarr[0], dist_df=self.clade_dist_cct_specific_df_dict[clade],
+            clade=clade, ax=axarr[1][0], dist_df=self.clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
-        axarr[0].set_ylabel('BrayCurtis distance', fontsize='x-small', fontweight='bold')
-        axarr[0].spines['top'].set_visible(False)
-        axarr[0].spines['right'].set_visible(False)
-        axarr[0].spines['left'].set_visible(False)
+        axarr[1][0].set_yticks([0.0, 1.0])
+        self._remove_spines_from_dendro(axarr[1])
 
         # get the uids in order for the profiles in the dendrogram
         ordered_prof_uid_list = []
@@ -402,8 +485,8 @@ class RestrepoAnalysis:
             prof_uid_to_x_loc_dict[temp_uid] = x_loc
 
         # Plot labels in second axes
-        self._plot_labels_plot_for_dendro_and_meta_fig(axarr[0], dendro_info, axarr[1])
-        axarr[1].set_ylabel('ITS2 type profile name')
+        self._plot_labels_plot_for_dendro_and_meta_fig(axarr[1][0], dendro_info, axarr[1][1])
+        axarr[1][1].set_ylabel('ITS2 type profile name')
 
 
         # for each ITS2 type profile we will need to get the samples that the profile was found in
@@ -424,9 +507,9 @@ class RestrepoAnalysis:
             profile_uid_to_sample_uid_list_dict[prof_uid].extend(non_zero_indices)
 
         # we will work with a class for doing the mata plotting as it will be quite involved
-        mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[2:],
+        mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[1][2:],
                               prof_uid_to_smpl_uid_list_dict=profile_uid_to_sample_uid_list_dict,
-                              prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=axarr[0])
+                              prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=axarr[1][0], sub_cat_axarr=axarr[0][2:])
         mip.plot_species_meta()
         mip.plot_depth_meta()
         mip.plot_reef_type()
@@ -438,6 +521,16 @@ class RestrepoAnalysis:
         for profile_uid in ordered_prof_uid_list:
             list_of_smpl_uids = profile_uid_to_sample_uid_list_dict
 
+    def _remove_spines_from_dendro(self, axarr, clade_index=None):
+        if clade_index is not None:
+            if clade_index == 0:
+                axarr[0].set_ylabel('BrayCurtis distance', fontsize='x-small', fontweight='bold')
+        else:
+            axarr[0].set_ylabel('BrayCurtis distance', fontsize='x-small', fontweight='bold')
+
+        axarr[0].spines['top'].set_visible(False)
+        axarr[0].spines['right'].set_visible(False)
+        axarr[0].spines['left'].set_visible(False)
 
     def _plot_labels_plot_for_dendro_and_meta_fig(self, dend_ax, dendro_info, labels_ax):
         # make the x axis limits of the labels plot exactly the same as the dendrogram plot
@@ -452,7 +545,13 @@ class RestrepoAnalysis:
 
         self._add_lines_to_axis(coll, labels_ax)
 
-        labels_ax.axis('off')
+
+        labels_ax.spines['right'].set_visible(False)
+        labels_ax.spines['left'].set_visible(False)
+        labels_ax.spines['top'].set_visible(False)
+        labels_ax.spines['bottom'].set_visible(False)
+        labels_ax.set_xticks([])
+        labels_ax.set_yticks([])
 
     def _add_lines_to_axis(self, coll, labels_ax):
         labels_ax.add_collection(coll)
@@ -503,12 +602,75 @@ class RestrepoAnalysis:
                                    verticalalignment='center', fontsize='xx-small', fontweight='bold'))
         return annotation_list
 
-    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig(self, list_of_heights):
-        gs = gridspec.GridSpec(sum(list_of_heights), 1)
+    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(self, list_of_heights):
+        gs = gridspec.GridSpec(sum(list_of_heights), 26)
+
+        # 2d list where each list is a column contining multiple axes
 
         axarr = []
+        # first set of axes that will be used to put the subcategory labels for the metainfo
+        sub_cat_label_ax_list = []
         for i in range(len(list_of_heights)):
-            axarr.append(plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), 0:1]))
+            temp_ax = plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), :2])
+            temp_ax.spines['top'].set_visible(False)
+            temp_ax.spines['bottom'].set_visible(False)
+            temp_ax.spines['right'].set_visible(False)
+            temp_ax.spines['left'].set_visible(False)
+            temp_ax.set_xticks([])
+            temp_ax.set_yticks([])
+            temp_ax.set_ylim(0,1)
+            temp_ax.set_xlim(0,1)
+            sub_cat_label_ax_list.append(temp_ax)
+        axarr.append(sub_cat_label_ax_list)
+
+
+        # then add the main data ax lists, one for each clade
+        for clade in self.clades:
+            clade_ax_list = []
+            for i in range(len(list_of_heights)):
+                if clade == 'A':
+                    col_index_start = 2
+                    col_index_end = 10
+                elif clade == 'C':
+                    col_index_start = 10
+                    col_index_end = 18
+                else:
+                    col_index_start = 18
+                    col_index_end = 26
+
+                clade_ax_list.append(plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), col_index_start:col_index_end]))
+            axarr.append(clade_ax_list)
+
+
+        return axarr
+
+    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig(self, list_of_heights):
+        gs = gridspec.GridSpec(sum(list_of_heights), 10)
+
+        # 2d list where each list is a column contining multiple axes
+
+        axarr = []
+        # first set of axes that will be used to put the subcategory labels for the metainfo
+        sub_cat_label_ax_list = []
+        for i in range(len(list_of_heights)):
+            temp_ax = plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), :2])
+            temp_ax.spines['top'].set_visible(False)
+            temp_ax.spines['bottom'].set_visible(False)
+            temp_ax.spines['right'].set_visible(False)
+            temp_ax.spines['left'].set_visible(False)
+            temp_ax.set_xticks([])
+            temp_ax.set_yticks([])
+            temp_ax.set_ylim(0,1)
+            temp_ax.set_xlim(0,1)
+            sub_cat_label_ax_list.append(temp_ax)
+        axarr.append(sub_cat_label_ax_list)
+
+        # add the main data ax
+        clade_a_ax_list = []
+        for i in range(len(list_of_heights)):
+            clade_a_ax_list.append(plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), 2:]))
+        axarr.append(clade_a_ax_list)
+
 
         return axarr
 
@@ -718,12 +880,16 @@ class RestrepoAnalysis:
 
 
 class MetaInfoPlotter:
-    def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_x_loc_dict, dend_ax):
+    def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_x_loc_dict, dend_ax, sub_cat_axarr, clade_index):
         self.parent_analysis = parent_analysis
         self.ordered_prof_uid_list = ordered_uid_list
+        self.clade_index = clade_index
+        # these are the axes that will display the actual data
         self.meta_axarr = meta_axarr
+        # these are the axes that will hold the subcategory labels
+        self.sub_cat_axarr = sub_cat_axarr
         # set the x axis lims to match the dend_ax
-        for ax, label in zip(self.meta_axarr, ['Species', 'Depth', 'Reef Type', 'Season']):
+        for ax, cat_ax, label in zip(self.meta_axarr, self.sub_cat_axarr, ['Species', 'Depth', 'Reef Type', 'Season']):
             ax.set_xlim(dend_ax.get_xlim())
             # ax.spines['top'].set_visible(False)
             # ax.spines['bottom'].set_visible(False)
@@ -732,8 +898,8 @@ class MetaInfoPlotter:
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_ylim((0, 1))
-            ax.set_ylabel(label, rotation='horizontal', fontweight='bold', fontsize='x-small', labelpad=30,
-                               verticalalignment='center')
+            cat_ax.set_ylabel(label, rotation='horizontal', fontweight='bold', fontsize='x-small',
+                               verticalalignment='center', labelpad=20)
         self.prof_uid_to_smpl_uid_list_dict = prof_uid_to_smpl_uid_list_dict
         self.prof_uid_to_x_loc_dict = prof_uid_to_x_loc_dict
         self.smpl_meta_df = self.parent_analysis.metadata_info_df
@@ -753,43 +919,48 @@ class MetaInfoPlotter:
         color_dict = {
             'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
             'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
-        category_list = ['G', 'GX', 'M', 'P', 'PC', 'SE', 'ST']
-        self.species_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0], color_dict=color_dict,
-                                               category_list=category_list, category_df_header='species')
+        category_list = ['M', 'G', 'GX',  'P', 'PC', 'SE', 'ST']
+        category_labels = ['M. dichotoma', 'G. planulata', 'G. fascicularis', 'Porites spp.', 'P. verrucosa', 'S. hystrix', 'S. pistillata']
+        self.species_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0], cat_ax=self.sub_cat_axarr[0], color_dict=color_dict,
+                                               category_list=category_list, category_df_header='species', category_labels=category_labels)
         self.species_plotter.plot()
 
     def plot_depth_meta(self):
         color_dict = {
             1:'#CAE1FF', 15: '#2E37FE', 30: '#000080'}
         category_list = [30, 15, 1]
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[1], color_dict=color_dict,
-                                               category_list=category_list, category_df_header='depth')
+        category_labels = ['30 m', '15 m', '1 m']
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[1], cat_ax=self.sub_cat_axarr[1],color_dict=color_dict,
+                                               category_list=category_list, category_df_header='depth', category_labels=category_labels)
         self.depth_plotter.plot()
 
     def plot_reef_type(self):
         color_dict = {
             'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000'}
         category_list = ['Offshore', 'Midshelf', 'Inshore']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], color_dict=color_dict,
-                                             category_list=category_list, category_df_header='reef_type')
+        category_labels = ['Offshore', 'Midshelf', 'Inshore']
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], cat_ax=self.sub_cat_axarr[2],color_dict=color_dict,
+                                             category_list=category_list, category_df_header='reef_type', category_labels=category_labels)
         self.depth_plotter.plot()
 
     def plot_season(self):
         color_dict = {
             'Summer': '#FF0000', 'Winter': '#00BFFF'}
         category_list = ['Summer', 'Winter']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], color_dict=color_dict,
-                                             category_list=category_list, category_df_header='season')
+        category_labels = ['Summer', 'Winter']
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], cat_ax=self.sub_cat_axarr[3],color_dict=color_dict,
+                                             category_list=category_list, category_df_header='season', category_labels=category_labels)
         self.depth_plotter.plot()
 
     class CatPlotter:
-        def __init__(self, parent_meta_plotter, ax, color_dict, category_list, category_df_header):
+        def __init__(self, parent_meta_plotter, ax, cat_ax, color_dict, category_list, category_df_header, category_labels):
             self.parent_meta_plotter = parent_meta_plotter
             self.prof_uid_list = self.parent_meta_plotter.ordered_prof_uid_list
             self.prof_uid_to_smpl_uid_list_dict = self.parent_meta_plotter.prof_uid_to_smpl_uid_list_dict
             self.prof_x_loc_dict = self.parent_meta_plotter.prof_uid_to_x_loc_dict
             self.meta_df = self.parent_meta_plotter.smpl_meta_df
             self.ax = ax
+            self.cat_ax = cat_ax
             x_loc_one = self.prof_x_loc_dict[self.prof_uid_list[0]]
             x_loc_two = self.prof_x_loc_dict[self.prof_uid_list[1]]
             self.dist_betwee_x_locs = x_loc_two - x_loc_one
@@ -800,12 +971,33 @@ class MetaInfoPlotter:
             self.color_dict = color_dict
             self.category_list = category_list
             self.category_df_header = category_df_header
+            self.cat_labels = category_labels
 
         def plot(self):
+            y0_list, height_list = self._plot_data_ax()
+
+            if self.parent_meta_plotter.clade_index == 0:
+                # only have to make the sub category plot once.
+                self._make_sub_category_plot(height_list, y0_list)
+
+        def _make_sub_category_plot(self, height_list, y0_list):
+            # now populate the category axis with the sub category labels
+            # y values will be the y0list + half the height
+            bar_height = height_list[0]
+            for cat_lab, y0_val in zip(self.cat_labels, y0_list):
+                if self.category_df_header == 'species':  # italics
+                    self.cat_ax.annotate(s=cat_lab, xy=(1, y0_val + (0.5 * bar_height)), horizontalalignment='right',
+                                         verticalalignment='center', fontsize='xx-small', fontstyle='italic')
+                else:
+                    self.cat_ax.annotate(s=cat_lab, xy=(1, y0_val + (0.5 * bar_height)), horizontalalignment='right',
+                                         verticalalignment='center', fontsize='xx-small')
+
+        def _plot_data_ax(self):
             """We will plot a horizontal bar plot using rectangle patches"""
             for prof_uid in self.prof_uid_list:
                 list_of_sample_uids = self.prof_uid_to_smpl_uid_list_dict[prof_uid]
-                list_of_cat_instances = [self.meta_df.at[smpl_uid, self.category_df_header] for smpl_uid in list_of_sample_uids]
+                list_of_cat_instances = [self.meta_df.at[smpl_uid, self.category_df_header] for smpl_uid in
+                                         list_of_sample_uids]
                 # calculate eveness
                 counter = Counter(list_of_cat_instances)
 
@@ -817,9 +1009,7 @@ class MetaInfoPlotter:
                         rect_p = patches.Rectangle(
                             xy=(x, y), width=w, height=h, facecolor=self.color_dict[s], edgecolor='none')
                         self.ax.add_patch(rect_p)
-
-
-
+            return y0_list, height_list
 
         def _get_rect_attributes(self, prof_uid, counter):
 
@@ -874,7 +1064,7 @@ if __name__ == "__main__":
             '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_D.dist'),
         meta_data_indput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/meta_info.csv',
         ignore_cache=True, cutoff_abund=0.06)
-    rest_analysis.make_dendrogram_with_meta()
+    rest_analysis.make_dendrogram_with_meta_all_clades()
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
 
