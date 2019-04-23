@@ -39,7 +39,7 @@ Assess why the UniFrac distance approximation is not working so well
 import os
 import pandas as pd
 import matplotlib as mpl
-mpl.use('TkAgg')
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.cluster.hierarchy
 import scipy.spatial.distance
@@ -361,16 +361,18 @@ class RestrepoAnalysis:
         https://matplotlib.org/users/transforms_tutorial.html
         """
 
-        fig = plt.figure(figsize=(20, 6))
+        fig = plt.figure(figsize=(25, 6))
         # required for getting the bbox of the text annotations
         fig.canvas.draw()
 
         apples = 'asdf'
         # order: dendro, label, species, depth, reef_type, season
-        list_of_heights = [18,18,7,3,3,2]
+        list_of_heights = [12,26,7,3,3,2]
         axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(list_of_heights)
         for i in range(len(self.clades)):
             self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr)
+        print('Saving image')
+        plt.savefig('here.png', dpi=1200)
 
     def _make_dendrogram_with_meta_fig_for_all_clades(self, clade_index, axarr):
         clade = self.clades[clade_index]
@@ -378,7 +380,10 @@ class RestrepoAnalysis:
         dendro_info = self._make_dendrogram_figure(
             clade=clade, ax=axarr[clade_index + 1][0], dist_df=self.clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
-        axarr[clade_index + 1][0].set_yticks([0.0, 1.0])
+        if clade_index == 0:
+            axarr[clade_index + 1][0].set_yticks([0.0, 1.0])
+        else:
+            axarr[clade_index + 1][0].set_yticks([])
         self._remove_spines_from_dendro(axarr[clade_index + 1], clade_index=clade_index)
 
         # get the uids in order for the profiles in the dendrogram
@@ -421,11 +426,8 @@ class RestrepoAnalysis:
         mip.plot_reef_type()
         mip.plot_season()
 
-        print('Saving image')
-        plt.savefig('here.png', dpi=1200)
-        # evenness can be calculated using skbio.diversity.alpha.simpson
-        for profile_uid in ordered_prof_uid_list:
-            list_of_smpl_uids = profile_uid_to_sample_uid_list_dict
+
+
 
     def make_dendrogram_with_meta_per_clade(self):
         """This function will make a figure that has a dendrogram at the top, the labels under that, then
@@ -603,15 +605,17 @@ class RestrepoAnalysis:
         return annotation_list
 
     def _setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(self, list_of_heights):
-        gs = gridspec.GridSpec(sum(list_of_heights), 26)
+        # in order (sub-cat, clade A, clade C, clade D)
+        plot_widths_list = [6,25,42,24]
 
+        gs = gridspec.GridSpec(sum(list_of_heights), sum(plot_widths_list))
         # 2d list where each list is a column contining multiple axes
 
         axarr = []
         # first set of axes that will be used to put the subcategory labels for the metainfo
         sub_cat_label_ax_list = []
         for i in range(len(list_of_heights)):
-            temp_ax = plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), :2])
+            temp_ax = plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), :plot_widths_list[0]])
             temp_ax.spines['top'].set_visible(False)
             temp_ax.spines['bottom'].set_visible(False)
             temp_ax.spines['right'].set_visible(False)
@@ -629,14 +633,14 @@ class RestrepoAnalysis:
             clade_ax_list = []
             for i in range(len(list_of_heights)):
                 if clade == 'A':
-                    col_index_start = 2
-                    col_index_end = 10
+                    col_index_start = plot_widths_list[0]
+                    col_index_end = sum(plot_widths_list[:2])
                 elif clade == 'C':
-                    col_index_start = 10
-                    col_index_end = 18
+                    col_index_start = sum(plot_widths_list[:2])
+                    col_index_end = sum(plot_widths_list[:3])
                 else:
-                    col_index_start = 18
-                    col_index_end = 26
+                    col_index_start = sum(plot_widths_list[:3])
+                    col_index_end = sum(plot_widths_list[:4])
 
                 clade_ax_list.append(plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), col_index_start:col_index_end]))
             axarr.append(clade_ax_list)
@@ -889,7 +893,7 @@ class MetaInfoPlotter:
         # these are the axes that will hold the subcategory labels
         self.sub_cat_axarr = sub_cat_axarr
         # set the x axis lims to match the dend_ax
-        for ax, cat_ax, label in zip(self.meta_axarr, self.sub_cat_axarr, ['Species', 'Depth', 'Reef Type', 'Season']):
+        for ax, cat_ax, label, labpad in zip(self.meta_axarr, self.sub_cat_axarr, ['Species', 'Depth', 'Reef\nType', 'Season'], [0,10,0,10]):
             ax.set_xlim(dend_ax.get_xlim())
             # ax.spines['top'].set_visible(False)
             # ax.spines['bottom'].set_visible(False)
@@ -898,8 +902,11 @@ class MetaInfoPlotter:
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_ylim((0, 1))
-            cat_ax.set_ylabel(label, rotation='horizontal', fontweight='bold', fontsize='x-small',
-                               verticalalignment='center', labelpad=20)
+            if clade_index ==0:
+                cat_ax.set_ylabel(label, rotation='vertical', fontweight='bold', fontsize='x-small',
+                                   verticalalignment='center', labelpad=labpad)
+
+
         self.prof_uid_to_smpl_uid_list_dict = prof_uid_to_smpl_uid_list_dict
         self.prof_uid_to_x_loc_dict = prof_uid_to_x_loc_dict
         self.smpl_meta_df = self.parent_analysis.metadata_info_df
