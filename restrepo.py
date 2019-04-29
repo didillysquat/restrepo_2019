@@ -50,6 +50,8 @@ import matplotlib.gridspec as gridspec
 from matplotlib import collections, patches
 from collections import defaultdict, Counter
 import skbio.diversity.alpha
+import skbio.stats.distance
+import sys
 
 
 class RestrepoAnalysis:
@@ -361,7 +363,7 @@ class RestrepoAnalysis:
         https://matplotlib.org/users/transforms_tutorial.html
         """
 
-        fig = plt.figure(figsize=(25, 6))
+        fig = plt.figure(figsize=(15, 6))
         # required for getting the bbox of the text annotations
         fig.canvas.draw()
 
@@ -384,6 +386,9 @@ class RestrepoAnalysis:
             axarr[clade_index + 1][0].set_yticks([0.0, 1.0])
         else:
             axarr[clade_index + 1][0].set_yticks([])
+
+        title_list = ['Symbiodinium', 'Cladocopium', 'Durisdinium']
+        axarr[clade_index + 1][0].set_title(label=title_list[clade_index], fontweight='bold', loc='center', fontstyle='italic', fontsize='small')
         self._remove_spines_from_dendro(axarr[clade_index + 1], clade_index=clade_index)
 
         # get the uids in order for the profiles in the dendrogram
@@ -410,12 +415,7 @@ class RestrepoAnalysis:
         # to make the grey code its probably easiest to make an RGB tupple scaling from 255,255,255 which is
         # white, to 0,0,0 which is black. This would be scaled against the eveness.
 
-        profile_uid_to_sample_uid_list_dict = defaultdict(list)
-        for prof_uid in list(self.prof_df_cutoff):
-            temp_series = self.prof_df_cutoff[prof_uid]
-            temp_series_non_zero_series = temp_series[temp_series > 0]
-            non_zero_indices = temp_series_non_zero_series.index.values.tolist()
-            profile_uid_to_sample_uid_list_dict[prof_uid].extend(non_zero_indices)
+        profile_uid_to_sample_uid_list_dict = self._generate_profile_uid_to_sample_uid_list_dict()
 
         # we will work with a class for doing the mata plotting as it will be quite involved
         mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[clade_index + 1][2:],
@@ -426,8 +426,22 @@ class RestrepoAnalysis:
         mip.plot_reef_type()
         mip.plot_season()
 
+    def _generate_profile_uid_to_sample_uid_list_dict(self, clade=None):
 
+        profile_uid_to_sample_uid_list_dict = defaultdict(list)
+        if clade is None:
+            for prof_uid in list(self.prof_df_cutoff):
+                self._pop_prof_uid_to_smp_name_dd_list(prof_uid, profile_uid_to_sample_uid_list_dict)
+        else:
+            for prof_uid in [uid for uid in list(self.prof_df_cutoff) if clade.upper() in self.prof_uid_to_name_dict[uid]]:
+                self._pop_prof_uid_to_smp_name_dd_list(prof_uid, profile_uid_to_sample_uid_list_dict)
+        return profile_uid_to_sample_uid_list_dict
 
+    def _pop_prof_uid_to_smp_name_dd_list(self, prof_uid, profile_uid_to_sample_uid_list_dict):
+        temp_series = self.prof_df_cutoff[prof_uid]
+        temp_series_non_zero_series = temp_series[temp_series > 0]
+        non_zero_indices = temp_series_non_zero_series.index.values.tolist()
+        profile_uid_to_sample_uid_list_dict[prof_uid].extend(non_zero_indices)
 
     def make_dendrogram_with_meta_per_clade(self):
         """This function will make a figure that has a dendrogram at the top, the labels under that, then
@@ -501,12 +515,7 @@ class RestrepoAnalysis:
         # to make the grey code its probably easiest to make an RGB tupple scaling from 255,255,255 which is
         # white, to 0,0,0 which is black. This would be scaled against the eveness.
 
-        profile_uid_to_sample_uid_list_dict = defaultdict(list)
-        for prof_uid in list(self.prof_df_cutoff):
-            temp_series = self.prof_df_cutoff[prof_uid]
-            temp_series_non_zero_series = temp_series[temp_series > 0]
-            non_zero_indices = temp_series_non_zero_series.index.values.tolist()
-            profile_uid_to_sample_uid_list_dict[prof_uid].extend(non_zero_indices)
+        profile_uid_to_sample_uid_list_dict = self._generate_profile_uid_to_sample_uid_list_dict()
 
         # we will work with a class for doing the mata plotting as it will be quite involved
         mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[1][2:],
@@ -732,7 +741,6 @@ class RestrepoAnalysis:
         labels = self._make_labels_list(dist_df, local_abundance_dict)
         return self._draw_one_dendrogram(ax, labels, linkage, thickness_dict, plot_labels)
 
-
     def _make_thickness_dict(self, clade, dist_df, local_abundance_dict):
         # generate the thickness dictionary. Lets work with line thicknesses of 1, 2, 3 and 4
         # assign according to which quartile
@@ -764,7 +772,6 @@ class RestrepoAnalysis:
         return hierarchy_sp.dendrogram_sp(linkage, labels=labels, ax=ax,
                                          node_to_thickness_dict=thickness_dict,
                                          default_line_thickness=0.5, leaf_rotation=90, no_labels=not plot_labels)
-
 
     def histogram_of_all_abundance_values(self):
         """ Plot a histogram of all of the type-rel-abund pairings so that we can assess whether there is a sensible
@@ -837,7 +844,6 @@ class RestrepoAnalysis:
             local_count = len(temp_series[temp_series > 0].index.values.tolist())
             self.prof_uid_to_local_abund_dict_post_cutoff[i] = local_count
 
-
     def get_list_of_clade_col_type_uids_for_unifrac(self):
         """ This is code for getting tuples of (DataSetSample uid, AnalysisType uid).
         These tuples can then be used to get a list of CladeCollectionType uids from the SymPortal terminal.
@@ -881,7 +887,60 @@ class RestrepoAnalysis:
 
         apples = 'asdf'
 
+    def permute_profile_permanova(self):
+        """ Compute a PERMANOVA based on the between type distance matrixces.  This is not totally straight forward.
+        Because the current profile distance matrix we have has each profile only listed once, and yet the
+        profiles can have been found multiple times, we will need to create a new distance matrix where the
+        sampling units are esentially CladeCollectionTypes, i.e. unique associations between a given sample and
+        an AnalysisType. The individual distances that will be used in this new matrix will be looked up from the
+        original profile distance matrix that was calculated using the specific set of CladeCollectionType IDs.
 
+        Pseudo-code
+        1 - Generate the profile uid to sample uid list dict
+        2 - generate empty df that is the new distance matrix
+        2a - Make a list of prof_uid_smp_uid strings in order.
+        2b - use this as the columns and index of the new dataframe to create empty df.
+        2c - create a DistanceMatrix object from the df
+        2d - on the way to collecting the distance matrix df also populate a list that will
+        be the groupings of the samples. I think this will need to be a single string that holds the grouping
+        data. E.g. pist_1_in_win for an S. pistillata sample from 1m depth from an inshore reef in the winter.
+        3 - once we have both the distance matrix and the group list we should be able to run the permanova and have
+        a look at the results!
+
+        """
+
+        for clade in self.clades:  # we will do a PERMANOVA per clade
+            prof_dist_df = self.clade_dist_cct_specific_df_dict[clade]
+            profile_uid_to_sample_uid_list_dict = self._generate_profile_uid_to_sample_uid_list_dict(clade=clade)
+            sample_unit_list = []
+            # this list contains only the prof uid info from the above sample_unit_list, in int form for use
+            # in the distance df lookup.
+            prof_uid_list = []
+            grouping_list = []
+            for profile_uid, smple_uid_list in profile_uid_to_sample_uid_list_dict.items():
+                for smp_uid in smple_uid_list:
+                    # get the series from the meta df
+                    temp_series = self.metadata_info_df.loc[smp_uid]
+                    grp_str = '_'.join([str(val).replace(' ','_') for val in temp_series.values.tolist()])
+                    prof_uid_list.append(profile_uid)
+                    sample_unit_list.append(f'{profile_uid}_{smp_uid}')
+                    grouping_list.append(grp_str)
+
+            df = pd.DataFrame(columns=sample_unit_list, index=sample_unit_list)
+            print(f'Populating clade {clade} {len(list(df))}x{len(list(df))} distance matrix for PERMANOVA.')
+            for r_ind in range(len(list(df))):
+                print(f'row {r_ind} populated')
+                for c_ind in range(len(list(df))):
+                    df.iat[r_ind, c_ind] = prof_dist_df[prof_uid_list[r_ind]][prof_uid_list[c_ind]]
+
+            # make the distance matrix object
+            dm = skbio.stats.distance.DistanceMatrix(df)
+
+            # do the permanova
+            permanova_results = skbio.stats.distance.permanova(
+                distance_matrix=dm, grouping=grouping_list, permutations=999)
+
+        apples = 'pies'
 
 class MetaInfoPlotter:
     def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_x_loc_dict, dend_ax, sub_cat_axarr, clade_index):
@@ -902,9 +961,9 @@ class MetaInfoPlotter:
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_ylim((0, 1))
-            if clade_index ==0:
-                cat_ax.set_ylabel(label, rotation='vertical', fontweight='bold', fontsize='x-small',
-                                   verticalalignment='center', labelpad=labpad)
+            # if clade_index ==0:
+            #     cat_ax.set_ylabel(label, rotation='vertical', fontweight='bold', fontsize='x-small',
+            #                        verticalalignment='center', labelpad=labpad)
 
 
         self.prof_uid_to_smpl_uid_list_dict = prof_uid_to_smpl_uid_list_dict
@@ -1071,6 +1130,7 @@ if __name__ == "__main__":
             '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_D.dist'),
         meta_data_indput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/meta_info.csv',
         ignore_cache=True, cutoff_abund=0.06)
+    rest_analysis.permute_profile_permanova()
     rest_analysis.make_dendrogram_with_meta_all_clades()
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
