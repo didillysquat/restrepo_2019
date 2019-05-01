@@ -907,7 +907,12 @@ class RestrepoAnalysis:
         3 - once we have both the distance matrix and the group list we should be able to run the permanova and have
         a look at the results!
 
+        It turns out that we can't do a factorial permanova using the skbio implementation. As such we will have to
+        do the permanova in R using adonis. We can run r from within python using the rpy2 package.
         """
+
+        # import rpy2.robjects as robjects
+
 
         for clade in self.clades:  # we will do a PERMANOVA per clade
             prof_dist_df = self.clade_dist_cct_specific_df_dict[clade]
@@ -916,29 +921,65 @@ class RestrepoAnalysis:
             # this list contains only the prof uid info from the above sample_unit_list, in int form for use
             # in the distance df lookup.
             prof_uid_list = []
-            grouping_list = []
+            # the indexes in order that we will want to take from the meta df and pass to our PERMANOVA
+            meta_info_indices = []
             for profile_uid, smple_uid_list in profile_uid_to_sample_uid_list_dict.items():
                 for smp_uid in smple_uid_list:
                     # get the series from the meta df
-                    temp_series = self.metadata_info_df.loc[smp_uid]
-                    grp_str = '_'.join([str(val).replace(' ','_') for val in temp_series.values.tolist()])
+                    meta_info_indices.append(smp_uid)
                     prof_uid_list.append(profile_uid)
                     sample_unit_list.append(f'{profile_uid}_{smp_uid}')
-                    grouping_list.append(grp_str)
 
-            df = pd.DataFrame(columns=sample_unit_list, index=sample_unit_list)
-            print(f'Populating clade {clade} {len(list(df))}x{len(list(df))} distance matrix for PERMANOVA.')
-            for r_ind in range(len(list(df))):
-                print(f'row {r_ind} populated')
-                for c_ind in range(len(list(df))):
-                    df.iat[r_ind, c_ind] = prof_dist_df[prof_uid_list[r_ind]][prof_uid_list[c_ind]]
+            meta_info_df_for_clade = self.metadata_info_df.loc[meta_info_indices, :]
 
-            # make the distance matrix object
-            dm = skbio.stats.distance.DistanceMatrix(df)
+            output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_types_{clade}.csv')
+            output_pickle_dist_matrix = os.path.join(self.cache_dir, f'dists_permanova_types_{clade}.p')
+            output_path_meta_info = os.path.join(self.outputs_dir, f'meta_info_{clade}.csv')
+            if os.path.exists(output_pickle_dist_matrix):
+                dist_df = pickle.load(open(output_pickle_dist_matrix, 'rb'))
+            else:
+                dist_df = pd.DataFrame(columns=sample_unit_list, index=sample_unit_list)
+                print(f'Populating clade {clade} {len(list(dist_df))}x{len(list(dist_df))} distance matrix for PERMANOVA.')
+                for r_ind in range(len(list(dist_df))):
+                    print(f'row {r_ind} populated')
+                    for c_ind in range(len(list(dist_df))):
+                        dist_df.iat[r_ind, c_ind] = prof_dist_df[prof_uid_list[r_ind]][prof_uid_list[c_ind]]
+                pickle.dump(dist_df, open(output_pickle_dist_matrix, 'wb'))
 
-            # do the permanova
-            permanova_results = skbio.stats.distance.permanova(
-                distance_matrix=dm, grouping=grouping_list, permutations=999)
+            # here we have the distance matrix that we will want to compute on
+            # we should write this out as a csv with no rows or headers so that we can read it in in R
+            dist_df.to_csv(path_or_buf=output_path_dist_matrix, sep=',', header=False, index=False, line_terminator='\n')
+
+            # we will also need to output the metainfo df for the analysis type instances in question
+            meta_info_df_for_clade.to_csv(
+                path_or_buf=output_path_meta_info, sep=',', header=True, index=False, line_terminator='\n')
+
+            import rpy2.robjects as robjects
+            import rpy2.robjects.packages as rpackages
+            from rpy2.robjects.vectors import StrVector
+            package_names = ('vegan',)
+
+            if all(rpackages.isinstalled(x) for x in package_names):
+                have_packages = True
+            else:
+                have_packages = False
+
+            if not have_packages:
+                utils = rpackages.importr('utils')
+                utils.chooseCRANmirror(ind=1)
+                package_names_to_install = [x for x in package_names if not rpackages.isinstalled(x)]
+                if package_names_to_install:
+                    utils.install_packages(StrVector(package_names_to_install))
+
+            r_distance_data = robjects.r(f'read.table(file="/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/dists_permanova_types_A.csv", sep=",", header=FALSE)')
+            r_meta_info = robjects.r(f'read.table(file="/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/meta_info_A.csv", sep=",", header=TRUE)')
+            vegan = rpackages.importr('vegan')
+
+            perm_results = robjects.r('')
+            print(data)
+            apples = 'asdf'
+
+
 
         apples = 'pies'
 
@@ -1130,8 +1171,8 @@ if __name__ == "__main__":
             '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_D.dist'),
         meta_data_indput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/meta_info.csv',
         ignore_cache=True, cutoff_abund=0.06)
+    # rest_analysis.make_dendrogram_with_meta_all_clades()
     rest_analysis.permute_profile_permanova()
-    rest_analysis.make_dendrogram_with_meta_all_clades()
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
 
