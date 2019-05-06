@@ -39,7 +39,7 @@ Assess why the UniFrac distance approximation is not working so well
 import os
 import pandas as pd
 import matplotlib as mpl
-mpl.use('Agg')
+mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 import scipy.cluster.hierarchy
 import scipy.spatial.distance
@@ -56,9 +56,11 @@ import sys
 
 class RestrepoAnalysis:
     def __init__(self, base_input_dir, profile_rel_abund_ouput_path, profile_abs_abund_ouput_path,
-                 seq_rel_abund_ouput_path, seq_abs_abund_ouput_path, clade_A_dist_path, clade_C_dist_path,
-                 clade_D_dist_path, clade_A_dist_cct_specific_path=None, clade_C_dist_cct_specific_path=None,
-                 clade_D_dist_cct_specific_path=None, ignore_cache=False, meta_data_indput_path=None, cutoff_abund=None):
+                 seq_rel_abund_ouput_path, seq_abs_abund_ouput_path,
+                 clade_A_profile_dist_path, clade_C_profile_dist_path, clade_D_profile_dist_path,
+                 clade_A_smpl_dist_path, clade_C_smpl_dist_path, clade_D_smpl_dist_path,
+                 clade_A__profile_dist_cct_specific_path=None, clade_C_profile_dist_cct_specific_path=None,
+                 clade_D__profile_dist_cct_specific_path=None, ignore_cache=False, meta_data_input_path=None, cutoff_abund=None):
         # Although we see clade F in the dataset this is minimal and so we will
         # tackle this sepeately to the analysis of the A, C and D.
         self.cwd = os.path.dirname(os.path.realpath(__file__))
@@ -70,16 +72,24 @@ class RestrepoAnalysis:
         self.profile_abs_abund_ouput_path = os.path.join(self.base_input_dir, profile_abs_abund_ouput_path)
         self.seq_rel_abund_ouput_path = os.path.join(self.base_input_dir, seq_rel_abund_ouput_path)
         self.seq_abs_abund_ouput_path = os.path.join(self.base_input_dir, seq_abs_abund_ouput_path)
-        self.clade_dist_path_dict = {
-            'A' : os.path.join(self.base_input_dir, clade_A_dist_path),
-            'C' : os.path.join(self.base_input_dir, clade_C_dist_path),
-            'D' : os.path.join(self.base_input_dir, clade_D_dist_path)}
+        # Paths to the standard output profile distance files
+        self.profile_clade_dist_path_dict = {
+            'A' : os.path.join(self.base_input_dir, clade_A_profile_dist_path),
+            'C' : os.path.join(self.base_input_dir, clade_C_profile_dist_path),
+            'D' : os.path.join(self.base_input_dir, clade_D_profile_dist_path)}
 
         # Paths to the cct specific distances
-        self.clade_dist_cct_specific_path_dict = {
-            'A': os.path.join(self.base_input_dir, clade_A_dist_cct_specific_path),
-            'C': os.path.join(self.base_input_dir, clade_C_dist_cct_specific_path),
-            'D': os.path.join(self.base_input_dir, clade_D_dist_cct_specific_path)
+        self.profile_clade_dist_cct_specific_path_dict = {
+            'A': os.path.join(self.base_input_dir, clade_A__profile_dist_cct_specific_path),
+            'C': os.path.join(self.base_input_dir, clade_C_profile_dist_cct_specific_path),
+            'D': os.path.join(self.base_input_dir, clade_D__profile_dist_cct_specific_path)
+        }
+
+        # Paths to the smpl distance (bray curtis sqrt transformed abundance)
+        self.sample_clade_dist_path_dict = {
+            'A': os.path.join(self.base_input_dir, clade_A_smpl_dist_path),
+            'C': os.path.join(self.base_input_dir, clade_C_smpl_dist_path),
+            'D': os.path.join(self.base_input_dir, clade_D_smpl_dist_path)
         }
 
         # Iterative attributes
@@ -87,9 +97,9 @@ class RestrepoAnalysis:
         # cache implementation
         self.cache_dir = os.path.join(self.cwd, 'cache')
         os.makedirs(self.cache_dir, exist_ok=True)
-        self.clade_dist_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_df_dict.p')
-        self.clade_dist_cct_specific_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_cct_specific_dict.p')
-
+        self.profile_clade_dist_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_df_dict.p')
+        self.profile_clade_dist_cct_specific_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_cct_specific_dict.p')
+        self.sample_clade_dist_dict_p_path = os.path.join(self.cache_dir, 'sample_clade_dist_df_dict.p')
         # Info containers
         self.smp_uid_to_name_dict = None
         self.smp_name_to_uid_dict = None
@@ -98,12 +108,14 @@ class RestrepoAnalysis:
         self.prof_uid_to_global_abund_dict = None
         self.prof_uid_to_name_dict = None
         self.prof_name_to_uid_dict = None
-        self.clade_dist_df_dict = {}
+        self.profile_clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict()
-        self.clade_dist_cct_specific_df_dict = {}
-        if self.clade_dist_cct_specific_path_dict['A']:
+        self.profile_clade_dist_cct_specific_df_dict = {}
+        if self.profile_clade_dist_cct_specific_path_dict['A']:
             # if we have the cct_speicifc distances
             self._populate_clade_dist_df_dict(cct_specific=True)
+        self.sample_clade_dist_df_dict = {}
+        self._populate_clade_dist_df_dict(smp_dist=True)
         self.profile_df  = None
         self._populate_profile_df()
         self.type_uid_to_name_dict = {}
@@ -115,8 +127,8 @@ class RestrepoAnalysis:
             self.cutoff_abund = cutoff_abund
             self.prof_df_cutoff = None
         # metadata_info_df
-        if meta_data_indput_path is not None:
-            self.metadata_info_df = self._init_metadata_info_df(meta_data_indput_path)
+        if meta_data_input_path is not None:
+            self.metadata_info_df = self._init_metadata_info_df(meta_data_input_path)
         else:
             self.metadata_info_df = None
 
@@ -175,7 +187,7 @@ class RestrepoAnalysis:
         """
         meta_info_df = pd.DataFrame.from_csv(meta_info_path)
         # The same names in the meta info are different from those in the SymPortal output.
-        # parse through the meta info names and make sure theat they are found in only one of the SP output names
+        # parse through the meta info names and make sure that they are found in only one of the SP output names
         # then, we can simply modify the sample uid to name dictionary (or better make a new one)
         new_name_to_old_name_dict = {}
         old_to_search = list(self.smp_uid_to_name_dict.values())
@@ -189,8 +201,6 @@ class RestrepoAnalysis:
                 for old_name in old_to_search:
                     if new_name in old_name:
                         old_name_match = old_name
-
-
                         count += 1
                 if count != 1:
                     print(f'New name {new_name} not found in SP output {count}')
@@ -204,6 +214,12 @@ class RestrepoAnalysis:
                 self.profile_df.drop(index=uid, inplace=True)
                 if self.prof_df_cutoff is not None:
                     self.prof_df_cutoff.drop(index=uid, inplace=True)
+                if self.sample_clade_dist_df_dict:
+                    for clade in self.clades:
+                        if uid in self.sample_clade_dist_df_dict[clade].index.values.tolist():
+                            self.sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True)
+                            self.sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True)
+
                 break
 
         # now that we have a conversion from new_name to old name, we can use this to look up the uid of the
@@ -215,10 +231,9 @@ class RestrepoAnalysis:
 
         meta_info_df.index = new_uid_index
         meta_info_df.columns = ['reef', 'reef_type', 'depth', 'species', 'season']
+        meta_info_df = meta_info_df[['species', 'reef', 'reef_type', 'depth', 'season']]
+
         return meta_info_df
-
-
-        apples = 'asdf'
 
 
     def _add_new_name_to_old_name_entry_manually(self, new_name, new_name_to_old_name_dict, old_to_search):
@@ -253,48 +268,67 @@ class RestrepoAnalysis:
             new_name_to_old_name_dict[new_name] = 'M-17_3697_TIPC4'
             old_to_search.remove('M-17_3697_TIPC4')
 
-    def _populate_clade_dist_df_dict(self, cct_specific=False):
+    def _populate_clade_dist_df_dict(self, cct_specific=False, smp_dist=False):
         """If cct_specific is set then we are making dfs for the distance matrices that are from the bespoke
         set of CladeCollectionTypes. If not set then it is the first set of distances that have come straight out
         of the SymPortal analysis with no prior processing. I have implemented a simple cache system."""
         if not self.ignore_cache:
-            self.pop_clade_dist_df_dict_from_cache_or_make_new(cct_specific)
+            self.pop_clade_dist_df_dict_from_cache_or_make_new(cct_specific, smp_dist)
         else:
-            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific)
+            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific, smp_dist)
 
-    def pop_clade_dist_df_dict_from_cache_or_make_new(self, cct_specific):
+    def pop_clade_dist_df_dict_from_cache_or_make_new(self, cct_specific, smp_dist):
         try:
-            if cct_specific:
-                self.clade_dist_cct_specific_df_dict = pickle.load(
-                    file=open(self.clade_dist_cct_specific_dict_p_path, 'rb'))
+            if smp_dist:
+                self.sample_clade_dist_df_dict = pickle.load(
+                    file=open(self.sample_clade_dist_dict_p_path, 'rb'))
+            elif cct_specific:
+                self.profile_clade_dist_cct_specific_df_dict = pickle.load(
+                    file=open(self.profile_clade_dist_cct_specific_dict_p_path, 'rb'))
             else:
-                self.clade_dist_df_dict = pickle.load(file=open(self.clade_dist_dict_p_path, 'rb'))
+                self.profile_clade_dist_df_dict = pickle.load(file=open(self.profile_clade_dist_dict_p_path, 'rb'))
         except FileNotFoundError:
-            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific)
+            self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific, smp_dist)
 
-    def _pop_clade_dict_df_dict_from_scratch_and_pickle_out(self, cct_specific):
-        self._pop_clade_dist_df_dict_from_scrath(cct_specific)
-        pickle.dump(obj=self.clade_dist_df_dict, file=open(self.clade_dist_dict_p_path, 'wb'))
+    def _pop_clade_dict_df_dict_from_scratch_and_pickle_out(self, cct_specific, smp_dist):
+        self._pop_clade_dist_df_dict_from_scrath(cct_specific, smp_dist)
 
-    def _pop_clade_dist_df_dict_from_scrath(self, cct_specific):
-        if cct_specific:
-            path_dict_to_use = self.clade_dist_cct_specific_path_dict
+    def _pop_clade_dist_df_dict_from_scrath(self, cct_specific, smp_dist):
+        if smp_dist:
+            path_dict_to_use = self.sample_clade_dist_path_dict
+        elif cct_specific:
+            path_dict_to_use = self.profile_clade_dist_cct_specific_path_dict
         else:
-            path_dict_to_use = self.clade_dist_path_dict
+            path_dict_to_use = self.profile_clade_dist_path_dict
         for clade in self.clades:
             with open(path_dict_to_use[clade], 'r') as f:
                 clade_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f][1:]]
 
             df = pd.DataFrame(clade_data)
-            self.type_uid_to_name_dict = {int(uid): name for uid, name in zip(df[1], df[0])}
+
+            if not smp_dist:
+                self.type_uid_to_name_dict = {int(uid): name for uid, name in zip(df[1], df[0])}
+
             df.drop(columns=0, inplace=True)
             df.set_index(keys=1, drop=True, inplace=True)
             df.index = df.index.astype('int')
             df.columns = df.index.values.tolist()
-            if cct_specific:
-                self.clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
+
+            if smp_dist:
+                self.sample_clade_dist_df_dict[clade] = df.astype(dtype='float')
+            elif cct_specific:
+                self.profile_clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
             else:
-                self.clade_dist_df_dict[clade] = df.astype(dtype='float')
+                self.profile_clade_dist_df_dict[clade] = df.astype(dtype='float')
+
+        if smp_dist:
+            pickle.dump(obj=self.sample_clade_dist_df_dict,
+                        file=open(self.sample_clade_dist_dict_p_path, 'wb'))
+        elif cct_specific:
+            pickle.dump(obj=self.profile_clade_dist_cct_specific_df_dict,
+                        file=open(self.profile_clade_dist_cct_specific_dict_p_path, 'wb'))
+        else:
+            pickle.dump(obj=self.profile_clade_dist_df_dict, file=open(self.profile_clade_dist_dict_p_path, 'wb'))
 
     def _populate_profile_df(self):
         # read in df
@@ -343,6 +377,158 @@ class RestrepoAnalysis:
         df.index = df.index.astype('int')
         self.profile_df = df
 
+    def plot_pcoa_of_cladal(self):
+        # Do a quick check to see if the samples in the distance matrices are matching up with the samples
+        # from the
+
+        from skbio.stats.ordination import pcoa
+        """ Here we will plot a series of PCoA for the sample distances and we will colour
+        them according to the meta info"""
+        fig = plt.figure(figsize=(15, 6))
+        # required for getting the bbox of the text annotations
+        fig.canvas.draw()
+        gs = gridspec.GridSpec(3, 5)
+        ax_arr = [[] for _ in range(3)]
+        meta_info_categories = list(self.metadata_info_df)
+        for j in range(len(self.clades)):  # for each clade
+            for i in range(len(meta_info_categories)):  # for each meta info category
+                temp_ax = plt.subplot(gs[j:j+1, i:i+1])
+                ax_arr[j].append(temp_ax)
+                temp_ax.set_xticks([])
+                temp_ax.set_yticks([])
+                temp_ax.set_facecolor('grey')
+                if j ==0: # if this is subplot in top row
+                    temp_ax.set_title(f'{meta_info_categories[i]}')
+                if i == 0: # if this is subplot in first column
+                    temp_ax.set_ylabel(f'{self.clades[j]}')
+                if j == 2: # if last row
+                    temp_ax.set_xlabel('PC1')
+                if i == 4: # if last column
+                    ax2 = temp_ax.twinx()
+                    ax2.set_yticks([])
+                    ax2.set_ylabel('PC2')
+
+        for j in range(len(self.clades)):  # for each clade
+            # We need to compute the pcoa coords for each clade. These will be the points plotted in the
+            # scatter for each of the different meta info for each clade
+            sample_clade_dist_df = self.sample_clade_dist_df_dict[self.clades[j]]
+            pcoa_output = pcoa(sample_clade_dist_df)
+            this = sum(pcoa_output.eigvals)
+
+            for i in range(len(meta_info_categories)):
+                # Here is where we need to look at each sample and colour according to the meta categories
+
+                color_dict = {
+                    'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
+                    'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E', 1: '#CAE1FF', 15: '#2E37FE', 30: '#000080',
+                    'Summer': '#FF0000', 'Winter': '#00BFFF','Inshore': '#FF0000',
+                    'Midshelf': '#FFFF00', 'Offshore': '#008000', 'Al Fahal':'#98FB98', 'Abu Madafi':'#F0E68C',
+                    'Qita al Kirsh':'#DDA0DD', 'Shib Nazar': '#8B008B', 'Tahla':'#00BFFF', 'Fsar':'#0000CD'}
+
+                species_category_list = ['M', 'G', 'GX', 'P', 'PC', 'SE', 'ST']
+                species_category_labels = ['M. dichotoma', 'G. planulata', 'G. fascicularis', 'Porites spp.',
+                                   'P. verrucosa', 'S. hystrix', 'S. pistillata']
+                color_list = []
+                for smp_uid in list(sample_clade_dist_df):
+                    color_list.append(color_dict[self.metadata_info_df.loc[smp_uid, meta_info_categories[i]]])
+
+                ax_arr[j][i].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'], marker='.', color=color_list, s=16)
+                spples = 'asdf'
+        apples = 'asdf'
+        plt.savefig(os.path.join(self.figure_dir, 'sample_annotated_ordination_no_legend.png'))
+    def make_dendrogram_with_meta_all_clades_sample_dists(self):
+        """ We will produce a similar figure to the one that we have already produced for the types."""
+        raise NotImplementedError
+
+    def make_sample_balance_figure(self):
+        class BalanceFigureMap:
+            def __init__(self, parent):
+                # self.fig = plt.figure(figsize=(12, 12))
+                self.parent = parent
+                self.outer_gs = gridspec.GridSpec(2,2)
+                self.depths = [1, 15, 30]
+                self.seasons = ['winter', 'summer']
+                self.reefs = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
+                self.reef_types = ['onshore', 'midshore', 'offshore']
+                self.depth_height = 1
+                self.depth_width = 6
+                self.reef_height = 3 * self.depth_height
+                self.reef_width = 1
+                self.reef_type_height = 2 * self.reef_height
+                self.reef_type_width = 1
+                self.inner_height = len(self.depths) * len(self.reefs) * 1 / 3 * self.depth_height
+                self.inner_width = self.reef_width + self.reef_type_width + (len(self.seasons) * self.depth_width)
+
+
+            def setup_plotting_space(self):
+                import geopandas as gpd
+                for i in range(4): # for each of the major gridspaces
+                    if i == 0: # then plot map
+                        # basemap is screwed.
+                        # cartopy is difficult to get working too
+                        # https://github.com/conda-forge/cartopy-feedstock/issues/36
+                        # had to downgrade shapely to 1.5.17
+                        import cartopy.crs as ccrs
+                        import cartopy
+                        ccrs.PlateCarree()
+                        # plt.axes(projection=ccrs.PlateCarree())
+                        plt.figure()
+                        ax = plt.axes(projection=ccrs.PlateCarree())
+                        ax.coastlines()
+
+        blfm = BalanceFigureMap(parent=self)
+        blfm.setup_plotting_space()
+
+
+
+        # map_width = total_width/2
+        # map_height = total_height/2
+        #
+        # gs = gridspec.GridSpec(total_height, total_width)
+        # map_top_left = True  # if False then bottom right
+        #
+        #
+        #
+        # species = ['M', 'G', 'GX', 'P', 'PC', 'SE', 'ST']
+        # species_full = ['M. dichotoma', 'G. planulata', 'G. fascicularis', 'Porites spp.',
+        #                            'P. verrucosa', 'S. hystrix', 'S. pistillata']
+
+
+        # # required for getting the bbox of the text annotations
+        # fig.canvas.draw()
+        #
+        #
+        # reef_type_axarr = []
+        # for i in range(len(reef_types)):
+        #     gs_start_reef_type = i*reef_type_height
+        #     gs_stop_reef_type = (i+1)*reef_type_height
+        #
+        #     reef_type_axarr.append(plt.subplot(gs[gs_start_reef_type:gs_stop_reef_type, 0:reef_type_width]))
+        #
+        # reef_axarr = []
+        # for i in range(len(reefs)):
+        #     gs_start_reef = i*reef_height
+        #     gs_stop_reef = (i+1)*reef_height
+        #     reef_axarr.append(plt.subplot(gs[gs_start_reef:gs_stop_reef, reef_type_width:reef_type_width+reef_width]))
+        #
+        # winter_axarr = []
+        # for i in range(len(depths) * len(reefs)):
+        #     gs_start_winter = i * depth_height
+        #     gs_stop_winter = (i+1) * depth_height
+        #     width_start_winter = reef_type_width+reef_width
+        #     width_stop_winter = reef_type_width+reef_width+depth_width
+        #     winter_axarr.append(plt.subplot(gs[gs_start_winter:gs_stop_winter, width_start_winter:width_stop_winter]))
+        #
+        # summer_axarr = []
+        # for i in range(len(depths) * len(reefs)):
+        #     gs_start_summer = i * depth_height
+        #     gs_stop_summer = (i + 1) * depth_height
+        #     width_start_summer = reef_type_width + reef_width + depth_width
+        #     width_stop_summer = reef_type_width + reef_width + depth_width + depth_width
+        #     summer_axarr.append(plt.subplot(gs[gs_start_summer:gs_stop_summer, width_start_summer:width_stop_summer]))
+
+        apples = 'asdf'
+
     def make_dendrogram_with_meta_all_clades(self):
         """This function will make a figure that has a dendrogram at the top, the labels under that, then
         under this it will have data that link the metainfo to each of the types found.
@@ -380,7 +566,7 @@ class RestrepoAnalysis:
         clade = self.clades[clade_index]
         # Plot the dendrogram in first axes
         dendro_info = self._make_dendrogram_figure(
-            clade=clade, ax=axarr[clade_index + 1][0], dist_df=self.clade_dist_cct_specific_df_dict[clade],
+            clade=clade, ax=axarr[clade_index + 1][0], dist_df=self.profile_clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
         if clade_index == 0:
             axarr[clade_index + 1][0].set_yticks([0.0, 1.0])
@@ -487,7 +673,7 @@ class RestrepoAnalysis:
 
         # Plot the dendrogram in first axes
         dendro_info = self._make_dendrogram_figure(
-            clade=clade, ax=axarr[1][0], dist_df=self.clade_dist_cct_specific_df_dict[clade],
+            clade=clade, ax=axarr[1][0], dist_df=self.profile_clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
         axarr[1][0].set_yticks([0.0, 1.0])
         self._remove_spines_from_dendro(axarr[1])
@@ -710,12 +896,12 @@ class RestrepoAnalysis:
 
                 # plot the non cutoff dendro first
                 self._make_dendrogram_figure(
-                    clade=clade, ax=axarr[0], dist_df=self.clade_dist_df_dict[clade],
+                    clade=clade, ax=axarr[0], dist_df=self.profile_clade_dist_df_dict[clade],
                     local_abundance_dict = self.prof_uid_to_local_abund_dict)
 
                 # then the cct specific
                 self._make_dendrogram_figure(
-                    clade=clade, ax=axarr[1], dist_df=self.clade_dist_cct_specific_df_dict[clade],
+                    clade=clade, ax=axarr[1], dist_df=self.profile_clade_dist_cct_specific_df_dict[clade],
                     local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff)
 
                 plt.tight_layout()
@@ -727,7 +913,7 @@ class RestrepoAnalysis:
             # draw a single dendrogram per clade
             for clade in self.clades:
                 fig, ax = plt.subplots(figsize=(8, 12))
-                self._make_dendrogram_figure(clade=clade, ax=ax, dist_df=self.clade_dist_df_dict[clade],
+                self._make_dendrogram_figure(clade=clade, ax=ax, dist_df=self.profile_clade_dist_df_dict[clade],
                                              local_abundance_dict=self.prof_uid_to_local_abund_dict)
                 plt.tight_layout()
 
@@ -915,7 +1101,7 @@ class RestrepoAnalysis:
 
 
         for clade in self.clades:  # we will do a PERMANOVA per clade
-            prof_dist_df = self.clade_dist_cct_specific_df_dict[clade]
+            prof_dist_df = self.profile_clade_dist_cct_specific_df_dict[clade]
             profile_uid_to_sample_uid_list_dict = self._generate_profile_uid_to_sample_uid_list_dict(clade=clade)
             sample_unit_list = []
             # this list contains only the prof uid info from the above sample_unit_list, in int form for use
@@ -1151,27 +1337,38 @@ if __name__ == "__main__":
         profile_abs_abund_ouput_path='37_six_analysis_2019-04-17_07-14-49.317290.profiles.absolute.txt',
         seq_rel_abund_ouput_path='37_six_analysis_2019-04-17_07-14-49.317290.seqs.relative.txt',
         seq_abs_abund_ouput_path='37_six_analysis_2019-04-17_07-14-49.317290.seqs.absolute.txt',
-        clade_A_dist_path=os.path.join(
+        clade_A_profile_dist_path=os.path.join(
             'between_profile_distances', 'A',
             '2019-04-17_07-14-49.317290.bray_curtis_within_clade_profile_distances_A.dist'),
-        clade_C_dist_path=os.path.join(
+        clade_C_profile_dist_path=os.path.join(
             'between_profile_distances', 'C',
             '2019-04-17_07-14-49.317290.bray_curtis_within_clade_profile_distances_C.dist'),
-        clade_D_dist_path=os.path.join(
+        clade_D_profile_dist_path=os.path.join(
             'between_profile_distances', 'D',
             '2019-04-17_07-14-49.317290.bray_curtis_within_clade_profile_distances_D.dist'),
-        clade_A_dist_cct_specific_path=os.path.join(
+        clade_A__profile_dist_cct_specific_path=os.path.join(
             'cct_specific_between_profile_distances','2019-04-16_08-37-52_564623', 'between_profiles','A',
             '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_A.dist'),
-        clade_C_dist_cct_specific_path=os.path.join(
+        clade_C_profile_dist_cct_specific_path=os.path.join(
             'cct_specific_between_profile_distances', '2019-04-16_08-37-52_564623','between_profiles','C',
             '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_C.dist'),
-        clade_D_dist_cct_specific_path=os.path.join(
+        clade_D__profile_dist_cct_specific_path=os.path.join(
             'cct_specific_between_profile_distances', '2019-04-16_08-37-52_564623','between_profiles','D',
             '2019-04-16_08-37-52.564623.bray_curtis_within_clade_profile_distances_D.dist'),
-        meta_data_indput_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/meta_info.csv',
+        meta_data_input_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/meta_info.csv',
+        clade_A_smpl_dist_path=os.path.join(
+            'between_sample_distance_sqrt_trans', 'A',
+            '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_A.dist'),
+        clade_C_smpl_dist_path=os.path.join(
+            'between_sample_distance_sqrt_trans', 'C',
+            '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_C.dist'),
+        clade_D_smpl_dist_path=os.path.join(
+            'between_sample_distance_sqrt_trans', 'D',
+            '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
         ignore_cache=True, cutoff_abund=0.06)
     # rest_analysis.make_dendrogram_with_meta_all_clades()
+    rest_analysis.make_sample_balance_figure()
+    rest_analysis.plot_pcoa_of_cladal()
     rest_analysis.permute_profile_permanova()
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
