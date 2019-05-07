@@ -443,7 +443,7 @@ class RestrepoAnalysis:
     def make_sample_balance_figure(self):
         class BalanceFigureMap:
             def __init__(self, parent):
-                # self.fig = plt.figure(figsize=(12, 12))
+                self.fig = plt.figure(figsize=(12, 12))
                 self.parent = parent
                 self.outer_gs = gridspec.GridSpec(2,2)
                 self.depths = [1, 15, 30]
@@ -458,23 +458,148 @@ class RestrepoAnalysis:
                 self.reef_type_width = 1
                 self.inner_height = len(self.depths) * len(self.reefs) * 1 / 3 * self.depth_height
                 self.inner_width = self.reef_width + self.reef_type_width + (len(self.seasons) * self.depth_width)
+                self.total_width = self.inner_width * 2
+                self.total_height = self.inner_height * 2
+                self.big_map_width = self.total_width / 2
+                self.big_map_height = self.total_height / 2
+                self.outer_gs = gridspec.GridSpec(2, 2)
+                self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(3,3, subplot_spec=self.outer_gs[0:1,0:1])
+                # axes that we will be plotting on
+                self.large_map_ax = None
+                self.small_map_ax = None
 
 
             def setup_plotting_space(self):
-                import geopandas as gpd
+                import cartopy.crs as ccrs
+                import cartopy
+                from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+                """ We played with trying to get basemap to work but it is not worth the effort. There is too much
+                wrong with it and it is constantly crashing and not finding modules or environmental variable. I have
+                given up on trying to get it to work.
+                I also tried working with geopandas. This was also more hassle than it was worth and I decided to 
+                give up on this to. Instead, cartopy seems to be doing a great job. It was a little trickly to get
+                working. After doing its pip install I had to down grade the shapely module to 1.5.17. See:
+                https://github.com/conda-forge/cartopy-feedstock/issues/36
+                """
+
                 for i in range(4): # for each of the major gridspaces
                     if i == 0: # then plot map
-                        # basemap is screwed.
-                        # cartopy is difficult to get working too
-                        # https://github.com/conda-forge/cartopy-feedstock/issues/36
-                        # had to downgrade shapely to 1.5.17
-                        import cartopy.crs as ccrs
-                        import cartopy
-                        ccrs.PlateCarree()
-                        # plt.axes(projection=ccrs.PlateCarree())
-                        plt.figure()
-                        ax = plt.axes(projection=ccrs.PlateCarree())
-                        ax.coastlines()
+
+
+                        # map_ax=self.fig.add_subplot(221, projection=ccrs.PlateCarree())
+                        # map_ax.set_extent(extents=(38.7, 39.3, 22.0, 22.6))
+                        # map_ax.gridlines(draw_labels=True, xlocs=[38.6, 38.8, 39.0, 39.2, 39.4],
+                        #                             ylocs=[22.0, 22.2, 22.4, 22.6])
+                        # # as proof of principle we want to try to get an axis that is 38.8 --> 39.0 on the x
+                        # # and 22.0 --> 22.2 on the y.
+                        # # we will need to covert from data coordinate system to display, and then from display
+                        # # to the figure system so that we can then use add_axes.
+                        # dis_data = map_ax.transData.transform([(38.8,22.0),(39.0,22.2)])
+                        # inv = self.fig.transFigure.inverted()
+                        # fig_data = inv.transform(dis_data)
+                        # width = fig_data[1][0]-fig_data[0][0]
+                        # height = fig_data[1][1]-fig_data[0][1]
+                        # self.fig.add_axes([fig_data[0][0], fig_data[0][1], width, height])
+                        # apples = 'asdf'
+                        #
+                        # inset_ax = self.fig.add_axes([0.5,0.5,0.25,0.25], projection=ccrs.PlateCarree())
+                        # inset_ax.set_extent(extents=(38.7, 39.3, 22.0, 22.6))
+                        # inset_ax.gridlines(draw_labels=True, xlocs=[38.6, 38.8, 39.0, 39.2, 39.4],
+                        #                  ylocs=[22.0, 22.2, 22.4, 22.6])
+                        # apples = 'asdf'
+                        #
+                        #
+                        #
+                        #
+                        #
+                        # fig, axarr = plt.subplots(2, 2, figsize=[12, 12])
+                        # map_ax = axarr[0][0]
+                        # map_ax = plt.subplot(self.outer_gs[0:1, 0:1], projection=ccrs.PlateCarree(), zorder=1)
+                        # map_ax.plot([0,1,2,3,4])
+                        # axins = inset_axes(map_ax, width='33%', height='33%')
+                        # axins.plot([0, 1, 2, 3, 4])
+                        # appes = 'asdf'
+
+
+                        # ax = plt.axes(projection=ccrs.PlateCarree())
+                        # ax.set_extent(ax.get_extent())
+                        # ax.gridlines()
+                        # ax.plot([-60, 60], [60, 60], 'ob', transform=ccrs.PlateCarree())
+
+                        self.large_map_ax = plt.subplot(self.outer_gs[0:1,0:1], projection=ccrs.PlateCarree(), zorder=1)
+                        self.large_map_ax.set_extent(extents=(38.7, 39.3, 22.0, 22.6))
+
+                        land_10m = cartopy.feature.NaturalEarthFeature(category='physical', name='land',
+                                                                       scale='10m')
+                        self.large_map_ax.add_feature(land_10m, facecolor=[(238/255, 239/255, 219/255)], edgecolor='black')
+
+                        # # The below takes a long time to implement but does work. I will comment out for the time
+                        # # being and we can re implement when we are ready to plot for real.
+                        ocean_10m = cartopy.feature.NaturalEarthFeature(category='physical', name='ocean',
+                                                                        scale='10m')
+                        self.large_map_ax.add_feature(ocean_10m, facecolor=[(136/255, 182/255, 224/255)], edgecolor='black')
+
+                        # big_map = plt.axes(projection=ccrs.PlateCarree(central_longitude=39.088081))
+                        # ax.get_extent(x0=38.578, x1=39.362, y0=22.027, y1=22.553)
+
+                        self.large_map_ax.gridlines(draw_labels=True, xlocs=[38.6, 38.8, 39.0, 39.2, 39.4], ylocs=[22.0, 22.2, 22.4, 22.6])
+                        # ax.coastlines(resolution='10m', )
+                        x_site_coords = [38.778333,  38.854283, 38.960533, 38.992800,39.055275, 39.030267,]
+                        y_site_coords = [22.109143, 22.322533, 22.306233,  22.430717,22.308564,22.232617,]
+                        site_labels = ['Abu Madafi',"Shi'b Nazar", 'Al Fahal', 'Qita al-Kirsh','Tahla','Fsar',]
+                        self.large_map_ax.plot(x_site_coords[:2], y_site_coords[:2], 'ko')
+                        self.large_map_ax.plot(x_site_coords[2:4], y_site_coords[2:4], 'ks')
+                        self.large_map_ax.plot(x_site_coords[4:6], y_site_coords[4:6], 'k^')
+                        # Abu Madafi
+                        self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, site_labels[0])
+                        # Shi'b Nazar
+                        self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, site_labels[1])
+                        # Al Fahal
+                        self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, site_labels[2])
+                        # Qita al-Kirsh
+                        self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, site_labels[3])
+                        # Tahla
+                        self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, site_labels[4])
+                        # Fsar
+                        self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, site_labels[5])
+
+                        # now work towards the sub map plot within the main map window
+                        dis_data = self.large_map_ax.transData.transform([(39.0, 22.0), (39.3, 22.2)])
+                        inv = self.fig.transFigure.inverted()
+                        fig_data = inv.transform(dis_data)
+                        width = fig_data[1][0] - fig_data[0][0]
+                        height = fig_data[1][1] - fig_data[0][1]
+                        this = self.large_map_ax.zorder
+                        self.small_map_ax = self.fig.add_axes([fig_data[0][0], fig_data[0][1], width, height], zorder=2, projection=ccrs.PlateCarree())
+
+
+
+                        self.small_map_ax.set_extent(extents=(22.65, 65.46, 5.07, 33.34))
+
+                        land_110m = cartopy.feature.NaturalEarthFeature(category='physical', name='land',
+                                                                       scale='110m')
+                        self.small_map_ax.add_feature(land_110m, facecolor=[(238 / 255, 239 / 255, 219 / 255)],
+                                                      edgecolor='black', linewidth=0.2)
+
+                        # # The below takes a long time to implement but does work. I will comment out for the time
+                        # # being and we can re implement when we are ready to plot for real.
+                        ocean_110m = cartopy.feature.NaturalEarthFeature(category='physical', name='ocean',
+                                                                        scale='110m')
+                        self.small_map_ax.add_feature(ocean_110m, facecolor=[(136 / 255, 182 / 255, 224 / 255)],
+                                                      edgecolor='black', linewidth=0.2)
+                        boundary_110m = cartopy.feature.NaturalEarthFeature(category='cultural', name='admin_0_boundary_lines_land', scale='110m')
+                        self.small_map_ax.add_feature(boundary_110m, edgecolor='gray', linewidth=0.2, facecolor='None')
+                        recticle_x = (38.7+39.3)/2
+                        recticle_Y = (22.0+22.6)/2
+
+                        self.small_map_ax.plot(recticle_x, recticle_Y, 'k+', markersize=10)
+
+
+
+
+
+
+                        apples = 'asdf'
 
         blfm = BalanceFigureMap(parent=self)
         blfm.setup_plotting_space()
