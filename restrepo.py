@@ -52,6 +52,10 @@ from collections import defaultdict, Counter
 import skbio.diversity.alpha
 import skbio.stats.distance
 import sys
+from cartopy.mpl.gridliner import Gridliner
+import matplotlib.ticker as mticker
+import cartopy.crs as ccrs
+import cartopy
 
 
 class RestrepoAnalysis:
@@ -470,9 +474,8 @@ class RestrepoAnalysis:
 
 
             def setup_plotting_space(self):
-                import cartopy.crs as ccrs
-                import cartopy
-                from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+
                 """ We played with trying to get basemap to work but it is not worth the effort. There is too much
                 wrong with it and it is constantly crashing and not finding modules or environmental variable. I have
                 given up on trying to get it to work.
@@ -485,121 +488,139 @@ class RestrepoAnalysis:
                 for i in range(4): # for each of the major gridspaces
                     if i == 0: # then plot map
 
+                        self._draw_big_map()
 
-                        # map_ax=self.fig.add_subplot(221, projection=ccrs.PlateCarree())
-                        # map_ax.set_extent(extents=(38.7, 39.3, 22.0, 22.6))
-                        # map_ax.gridlines(draw_labels=True, xlocs=[38.6, 38.8, 39.0, 39.2, 39.4],
-                        #                             ylocs=[22.0, 22.2, 22.4, 22.6])
-                        # # as proof of principle we want to try to get an axis that is 38.8 --> 39.0 on the x
-                        # # and 22.0 --> 22.2 on the y.
-                        # # we will need to covert from data coordinate system to display, and then from display
-                        # # to the figure system so that we can then use add_axes.
-                        # dis_data = map_ax.transData.transform([(38.8,22.0),(39.0,22.2)])
-                        # inv = self.fig.transFigure.inverted()
-                        # fig_data = inv.transform(dis_data)
-                        # width = fig_data[1][0]-fig_data[0][0]
-                        # height = fig_data[1][1]-fig_data[0][1]
-                        # self.fig.add_axes([fig_data[0][0], fig_data[0][1], width, height])
-                        # apples = 'asdf'
-                        #
-                        # inset_ax = self.fig.add_axes([0.5,0.5,0.25,0.25], projection=ccrs.PlateCarree())
-                        # inset_ax.set_extent(extents=(38.7, 39.3, 22.0, 22.6))
-                        # inset_ax.gridlines(draw_labels=True, xlocs=[38.6, 38.8, 39.0, 39.2, 39.4],
-                        #                  ylocs=[22.0, 22.2, 22.4, 22.6])
-                        # apples = 'asdf'
-                        #
-                        #
-                        #
-                        #
-                        #
-                        # fig, axarr = plt.subplots(2, 2, figsize=[12, 12])
-                        # map_ax = axarr[0][0]
-                        # map_ax = plt.subplot(self.outer_gs[0:1, 0:1], projection=ccrs.PlateCarree(), zorder=1)
-                        # map_ax.plot([0,1,2,3,4])
-                        # axins = inset_axes(map_ax, width='33%', height='33%')
-                        # axins.plot([0, 1, 2, 3, 4])
-                        # appes = 'asdf'
+                        self._draw_small_map()
 
+                        self._reposition_small_map()
 
-                        # ax = plt.axes(projection=ccrs.PlateCarree())
-                        # ax.set_extent(ax.get_extent())
-                        # ax.gridlines()
-                        # ax.plot([-60, 60], [60, 60], 'ob', transform=ccrs.PlateCarree())
+            def _reposition_small_map(self):
+                # now readjust position
+                plt.draw()
+                large_map_bbox = self.large_map_ax.get_position()
+                small_map_bbox = self.small_map_ax.get_position()
+                self.small_map_ax.set_position([
+                    large_map_bbox.x1 - small_map_bbox.width,
+                    large_map_bbox.y0,
+                    small_map_bbox.width,
+                    small_map_bbox.height])
 
-                        self.large_map_ax = plt.subplot(self.outer_gs[0:1,0:1], projection=ccrs.PlateCarree(), zorder=1)
-                        self.large_map_ax.set_extent(extents=(38.7, 39.3, 22.0, 22.6))
+            def _draw_small_map(self):
+                self._calc_pos_of_inset_ax_and_init()
+                self.small_map_ax.set_extent(extents=(31, 60, 5, 33))
+                land_110m, ocean_110m, boundary_110m = self._get_naural_earth_features_small_map()
+                self._draw_natural_earth_features_small_map(land_110m, ocean_110m, boundary_110m)
+                self._annotate_small_map()
 
-                        land_10m = cartopy.feature.NaturalEarthFeature(category='physical', name='land',
-                                                                       scale='10m')
-                        self.large_map_ax.add_feature(land_10m, facecolor=[(238/255, 239/255, 219/255)], edgecolor='black')
+            def _draw_big_map(self):
+                self.large_map_ax = plt.subplot(self.outer_gs[0:1, 0:1], projection=ccrs.PlateCarree(), zorder=1)
+                self.large_map_ax.set_extent(extents=(38.7, 39.3, 22.0, 22.6))
+                land_10m, ocean_10m = self._get_naural_earth_features_big_map()
+                self._draw_natural_earth_features_big_map(land_10m, ocean_10m)
+                self._put_gridlines_on_large_map_ax()
+                self._annotate_big_map()
 
-                        # # The below takes a long time to implement but does work. I will comment out for the time
-                        # # being and we can re implement when we are ready to plot for real.
-                        ocean_10m = cartopy.feature.NaturalEarthFeature(category='physical', name='ocean',
-                                                                        scale='10m')
-                        self.large_map_ax.add_feature(ocean_10m, facecolor=[(136/255, 182/255, 224/255)], edgecolor='black')
+            def _annotate_small_map(self):
+                recticle_x = (38.7 + 39.3) / 2
+                recticle_Y = (22.0 + 22.6) / 2
+                self.small_map_ax.plot(recticle_x, recticle_Y, 'k+', markersize=10)
 
-                        # big_map = plt.axes(projection=ccrs.PlateCarree(central_longitude=39.088081))
-                        # ax.get_extent(x0=38.578, x1=39.362, y0=22.027, y1=22.553)
+            def _draw_natural_earth_features_small_map(self, land_110m, ocean_110m, boundary_110m):
+                """NB the RGB must be a tuple in a list and the R, G, B must be given as a value between 0 and 1"""
+                self.small_map_ax.add_feature(land_110m, facecolor=[(238 / 255, 239 / 255, 219 / 255)],
+                                              edgecolor='black', linewidth=0.2)
+                self.small_map_ax.add_feature(ocean_110m, facecolor=[(136 / 255, 182 / 255, 224 / 255)],
+                                              edgecolor='black', linewidth=0.2)
+                self.small_map_ax.add_feature(boundary_110m, edgecolor='gray', linewidth=0.2, facecolor='None')
 
-                        self.large_map_ax.gridlines(draw_labels=True, xlocs=[38.6, 38.8, 39.0, 39.2, 39.4], ylocs=[22.0, 22.2, 22.4, 22.6])
-                        # ax.coastlines(resolution='10m', )
-                        x_site_coords = [38.778333,  38.854283, 38.960533, 38.992800,39.055275, 39.030267,]
-                        y_site_coords = [22.109143, 22.322533, 22.306233,  22.430717,22.308564,22.232617,]
-                        site_labels = ['Abu Madafi',"Shi'b Nazar", 'Al Fahal', 'Qita al-Kirsh','Tahla','Fsar',]
-                        self.large_map_ax.plot(x_site_coords[:2], y_site_coords[:2], 'ko')
-                        self.large_map_ax.plot(x_site_coords[2:4], y_site_coords[2:4], 'ks')
-                        self.large_map_ax.plot(x_site_coords[4:6], y_site_coords[4:6], 'k^')
-                        # Abu Madafi
-                        self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, site_labels[0])
-                        # Shi'b Nazar
-                        self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, site_labels[1])
-                        # Al Fahal
-                        self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, site_labels[2])
-                        # Qita al-Kirsh
-                        self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, site_labels[3])
-                        # Tahla
-                        self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, site_labels[4])
-                        # Fsar
-                        self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, site_labels[5])
+            def _get_naural_earth_features_small_map(self):
+                land_110m = cartopy.feature.NaturalEarthFeature(category='physical', name='land',
+                                                                scale='110m')
+                ocean_110m = cartopy.feature.NaturalEarthFeature(category='physical', name='ocean',
+                                                                 scale='110m')
+                boundary_110m = cartopy.feature.NaturalEarthFeature(category='cultural',
+                                                                    name='admin_0_boundary_lines_land', scale='110m')
+                return land_110m, ocean_110m, boundary_110m
 
-                        # now work towards the sub map plot within the main map window
-                        dis_data = self.large_map_ax.transData.transform([(39.0, 22.0), (39.3, 22.2)])
-                        inv = self.fig.transFigure.inverted()
-                        fig_data = inv.transform(dis_data)
-                        width = fig_data[1][0] - fig_data[0][0]
-                        height = fig_data[1][1] - fig_data[0][1]
-                        this = self.large_map_ax.zorder
-                        self.small_map_ax = self.fig.add_axes([fig_data[0][0], fig_data[0][1], width, height], zorder=2, projection=ccrs.PlateCarree())
+            def _calc_pos_of_inset_ax_and_init(self):
+                """Creating an inset axis is quite difficult (maybe impossible to do) using the inset tools
+                or gridspec. The best way that I have found to do it is to use the fig.add_axes method that allows
+                the custom positioning of the axes in figure coordinates (that run from 0,0 to 1,1).
+                NB I was calculating the figure points where I wanted the plot to go using the below:
+                    To do this
+                    we need to convert from the axdata units to display units and then back into figure data units.
+                    We can then finally place the axes using these units.
+                However, when we apply the projection and extents the axes move slightly. In the end we can use this
+                method:
+                https://stackoverflow.com/a/45538400/5516420
+                And simply use the .get_position() method from the axes object to place our small map relatively.
+                This will be done after we have drawn all the feature of the small map. Please note though, that
+                the getting of the coordinates is largely redundant now as we could just have put this plot anywhere
+                in the figure and then repositioned later. But I will leave the code as it is as it will take longer
+                to change and it is useful for reference.
+                """
+                # now work towards the sub map plot within the main map window
+                dis_data = self.large_map_ax.transData.transform([(39.0, 22.0), (39.3, 22.2)])
+                inv = self.fig.transFigure.inverted()
+                fig_data = inv.transform(dis_data)
+                width = fig_data[1][0] - fig_data[0][0]
+                height = fig_data[1][1] - fig_data[0][1]
+                self.small_map_ax = self.fig.add_axes([fig_data[0][0], fig_data[0][1], width, height], zorder=2,
+                                                      projection=ccrs.PlateCarree())
 
+            def _annotate_big_map(self):
+                x_site_coords = [38.778333, 38.854283, 38.960533, 38.992800, 39.055275, 39.030267, ]
+                y_site_coords = [22.109143, 22.322533, 22.306233, 22.430717, 22.308564, 22.232617, ]
+                site_labels = ['Abu Madafi', "Shi'b Nazar", 'Al Fahal', 'Qita al-Kirsh', 'Tahla', 'Fsar', ]
+                self.large_map_ax.plot(x_site_coords[:2], y_site_coords[:2], 'ko')
+                self.large_map_ax.plot(x_site_coords[2:4], y_site_coords[2:4], 'ks')
+                self.large_map_ax.plot(x_site_coords[4:6], y_site_coords[4:6], 'k^')
+                # Abu Madafi
+                self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, site_labels[0])
+                # Shi'b Nazar
+                self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, site_labels[1])
+                # Al Fahal
+                self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, site_labels[2])
+                # Qita al-Kirsh
+                self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, site_labels[3])
+                # Tahla
+                self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, site_labels[4])
+                # Fsar
+                self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, site_labels[5])
 
+            def _draw_natural_earth_features_big_map(self, land_10m, ocean_10m):
+                """NB the RGB must be a tuple in a list and the R, G, B must be given as a value between 0 and 1"""
+                self.large_map_ax.add_feature(land_10m, facecolor=[(238 / 255, 239 / 255, 219 / 255)],
+                                              edgecolor='black')
+                self.large_map_ax.add_feature(ocean_10m, facecolor=[(136 / 255, 182 / 255, 224 / 255)],
+                                              edgecolor='black')
 
-                        self.small_map_ax.set_extent(extents=(22.65, 65.46, 5.07, 33.34))
+            def _get_naural_earth_features_big_map(self):
+                land_10m = cartopy.feature.NaturalEarthFeature(category='physical', name='land',
+                                                               scale='10m')
+                ocean_10m = cartopy.feature.NaturalEarthFeature(category='physical', name='ocean',
+                                                                scale='10m')
+                return land_10m, ocean_10m
 
-                        land_110m = cartopy.feature.NaturalEarthFeature(category='physical', name='land',
-                                                                       scale='110m')
-                        self.small_map_ax.add_feature(land_110m, facecolor=[(238 / 255, 239 / 255, 219 / 255)],
-                                                      edgecolor='black', linewidth=0.2)
+            def _put_gridlines_on_large_map_ax(self):
+                """ Although there is a GeoAxis.gridlines() method, this method does not yet allow a lot of
+                bespoke options. If we want to only put the labels on the top and left then we have to
+                generate a Gridliner object (normally returned by GeoAxis.gridlines() ourselves. We then need
+                to manually change the xlabels_bottom and ylabels_right attributes of this Gridliner object.
+                We then draw it by adding it to the GeoAxis._gridliners list."""
+                xlocs = [38.6, 38.8, 39.0, 39.2, 39.4]
+                ylocs = [22.0, 22.2, 22.4, 22.6]
 
-                        # # The below takes a long time to implement but does work. I will comment out for the time
-                        # # being and we can re implement when we are ready to plot for real.
-                        ocean_110m = cartopy.feature.NaturalEarthFeature(category='physical', name='ocean',
-                                                                        scale='110m')
-                        self.small_map_ax.add_feature(ocean_110m, facecolor=[(136 / 255, 182 / 255, 224 / 255)],
-                                                      edgecolor='black', linewidth=0.2)
-                        boundary_110m = cartopy.feature.NaturalEarthFeature(category='cultural', name='admin_0_boundary_lines_land', scale='110m')
-                        self.small_map_ax.add_feature(boundary_110m, edgecolor='gray', linewidth=0.2, facecolor='None')
-                        recticle_x = (38.7+39.3)/2
-                        recticle_Y = (22.0+22.6)/2
-
-                        self.small_map_ax.plot(recticle_x, recticle_Y, 'k+', markersize=10)
-
-
-
-
-
-
-                        apples = 'asdf'
+                if xlocs is not None and not isinstance(xlocs, mticker.Locator):
+                    xlocs = mticker.FixedLocator(xlocs)
+                if ylocs is not None and not isinstance(ylocs, mticker.Locator):
+                    ylocs = mticker.FixedLocator(ylocs)
+                g1 = Gridliner(
+                    axes=self.large_map_ax, crs=ccrs.PlateCarree(), draw_labels=True,
+                    xlocator=xlocs, ylocator=ylocs)
+                g1.xlabels_bottom = False
+                g1.ylabels_right = False
+                self.large_map_ax._gridliners.append(g1)
 
         blfm = BalanceFigureMap(parent=self)
         blfm.setup_plotting_space()
@@ -667,7 +688,7 @@ class RestrepoAnalysis:
 
         NB getting the bounding boxes for the annoations is quite involved.
         It basically involves calling get_window_extent() on the annotation object. This will give you a bbox object
-        which has its units in display units. You then have to transform this back to data units.
+        which has its units in display units. You then have to  this back to data units.
         This link for getting the bbox from the annotation:
         https://matplotlib.org/api/text_api.html#matplotlib.text.Annotation.get_window_extent
         This link for doing the transofrmations into the correct coordinates space:
