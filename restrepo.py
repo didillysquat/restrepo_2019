@@ -39,7 +39,7 @@ Assess why the UniFrac distance approximation is not working so well
 import os
 import pandas as pd
 import matplotlib as mpl
-mpl.use('TkAgg')
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.cluster.hierarchy
 import scipy.spatial.distance
@@ -451,9 +451,19 @@ class RestrepoAnalysis:
                 self.parent = parent
                 self.outer_gs = gridspec.GridSpec(2,2)
                 self.depths = [1, 15, 30]
-                self.seasons = ['winter', 'summer']
+                self.seasons = ['Winter', 'Summer']
                 self.reefs = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
                 self.reef_types = ['Inshore', 'Midshelf', 'Offshore']
+                self.species_color_dict = {
+                    'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
+                    'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
+                self.species_hatch_dict = {
+                    'G': '+', 'GX': 'x', 'M': '\\', 'P': 'o',
+                    'PC': '.', 'SE': '/', 'ST': 'O'}
+
+                self.species_category_list = ['M', 'G', 'GX', 'P', 'PC', 'SE', 'ST']
+                self.species_category_labels = ['M. dichotoma', 'G. planulata', 'G. fascicularis', 'Porites spp.', 'P. verrucosa',
+                                   'S. hystrix', 'S. pistillata']
                 self.depth_height = 1
                 self.depth_width = 6
                 self.reef_height = 3 * self.depth_height
@@ -470,8 +480,6 @@ class RestrepoAnalysis:
 
 
             def setup_plotting_space(self):
-
-
                 """ We played with trying to get basemap to work but it is not worth the effort. There is too much
                 wrong with it and it is constantly crashing and not finding modules or environmental variable. I have
                 given up on trying to get it to work.
@@ -481,7 +489,7 @@ class RestrepoAnalysis:
                 https://github.com/conda-forge/cartopy-feedstock/issues/36
                 """
 
-
+                max_width = 0
                 for i in range(4): # for each of the major gridspaces
                     if i == 0: # then plot map
 
@@ -495,44 +503,131 @@ class RestrepoAnalysis:
                     else:
                         # then we are working on the nearshore
 
-                        # set up the inner gs objects
-                        if i == 1:
-                            inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
-                                self.inner_rows,self.inner_cols, subplot_spec=self.outer_gs[0:1,1:2])
-                        elif i == 2:
-                            inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
-                                self.inner_rows, self.inner_cols, subplot_spec=self.outer_gs[1:2,0:1])
-                        else: # i == 3
-                            inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
-                                self.inner_rows, self.inner_cols, subplot_spec=self.outer_gs[1:2, 1:2])
+                        inner_gs = self._steup_inner_grid_spec_obj(i)
 
                         # setup the axes of the inner gs objects
-                        reef_type_ax = plt.subplot(inner_gs[0:self.reef_type_height, 0:self.reef_type_width])
-                        self._format_label_ax(reef_type_ax, label=self.reef_types[i-1])
+                        self._setup_reef_type_axis(i, inner_gs)
 
-                        reef_axarr = []
-                        for j in range(2):
-                            temp_reef_ax = plt.subplot(inner_gs[j*self.reef_height:(j*self.reef_height)+self.reef_height, self.reef_type_width:self.reef_type_width+self.reef_width])
-                            self._format_label_ax(temp_reef_ax, label=self.reefs[((i-1)*2)+j])
-                            reef_axarr.append(temp_reef_ax)
-
+                        self._setup_reef_axarr(i, inner_gs)
 
                         # season and then reef index. each inner list will have three ax
-                        depth_winter_ax_arr = [[[] for _ in range(int(len(self.reefs)*1/3))] for _ in range(len(self.seasons))]
-                        for season_index in range(len(self.seasons)): # for each season
-                            for reef_index in range(2): # for each reef
-                                for depth_index in range(len(self.depths)): # for each depth
-                                    row_start = reef_index*len(self.depths) + depth_index
-                                    row_end = row_start + self.depth_height
-                                    col_start = self.reef_type_width + self.reef_width + season_index * self.depth_width
-                                    col_end = col_start + self.depth_width
-                                    temp_depth_ax = plt.subplot(inner_gs[row_start:row_end, col_start:col_end])
-                                    self._format_label_ax(temp_depth_ax, label=f'{self.depths[depth_index]}m')
-                                    depth_winter_ax_arr[season_index][reef_index].append(temp_depth_ax)
+                        self._do_depth_plotting(i, inner_gs)
+
+                print('saving fig')
+                plt.savefig(os.path.join(self.parent.figure_dir, 'map_balance.png'), dpi=1200)
+
 
                 apples = 'asdf'
 
-            def _format_label_ax(self, ax, label):
+            def _do_depth_plotting(self, i, inner_gs):
+                max_width = 0
+                depth_winter_ax_arr = [[[] for _ in range(int(len(self.reefs) * 1 / 3))] for _ in
+                                       range(len(self.seasons))]
+                for season_index, season_name in enumerate(self.seasons):  # for each season
+                    for reef_index, reef_name in enumerate(self.reefs[(i - 1) * 2:((i - 1) * 2) + 2]):  # for each reef
+                        for depth_index, depth_name in enumerate(self.depths):  # for each depth
+                            col_end, col_start, row_end, row_start = self._get_inner_gs_indices(depth_index,
+                                                                                                reef_index,
+                                                                                                season_index)
+                            temp_depth_ax = self._format_temp_depth_axes(
+                                col_end, col_start, depth_index, inner_gs, reef_index, row_end,
+                                row_start, season_index)
+                            depth_winter_ax_arr[season_index][reef_index].append(temp_depth_ax)
+
+                            # here we can do the actual plotting if we want. This will save us
+                            # having to iter back through the axarr structure
+                            # we should be sure to plot this in the same order as the dendrogram meta info
+                            bar_widths, bar_ys, species_c_list = self._get_bar_plot_info(
+                                depth_name, i, max_width, reef_name, season_name)
+                            self._plot_bars(bar_widths, bar_ys, species_c_list, temp_depth_ax)
+
+            def _plot_bars(self, bar_widths, bar_ys, species_c_list, temp_depth_ax):
+                bars = []
+                if sum(bar_widths) != 0:
+                    for y, w, c in zip(bar_ys, bar_widths, species_c_list):
+                        bars.append(temp_depth_ax.barh(y=y, width=w,
+                                                       height=1 / len(self.species_category_list), align='edge',
+                                                       fill=True, edgecolor='black', color=c))
+                else:
+                    temp_depth_ax.set_fc('white')
+                    temp_depth_ax.text(2.5, 0.5, 'Not Available', horizontalalignment='center',
+                                       verticalalignment='center')
+
+            def _get_bar_plot_info(self, depth_name, i, max_width, reef_name, season_name):
+                bar_ys = [_ * (1 / len(self.species_category_list)) for _ in range(len(self.species_category_list))]
+                bar_width_dict = defaultdict(int)
+                for spec_cat in self.species_category_list:
+                    rows_of_interest = self.parent.metadata_info_df.loc[
+                        (self.parent.metadata_info_df['species'] == spec_cat) &
+                        (self.parent.metadata_info_df['reef'] == reef_name) &
+                        (self.parent.metadata_info_df['season'] == season_name) &
+                        (self.parent.metadata_info_df['depth'] == depth_name) &
+                        (self.parent.metadata_info_df['reef_type'] == self.reef_types[i - 1])]
+                    bar_width_dict[spec_cat] += len(rows_of_interest.index.values.tolist())
+                bar_widths = [bar_width_dict[spec_cat] for spec_cat in self.species_category_list]
+                species_c_list = [
+                    self.species_color_dict[spec_cat] for spec_cat in self.species_category_list]
+                species_h_list = [
+                    self.species_hatch_dict[spec_cat] for spec_cat in self.species_category_list]
+                if max(bar_widths) > max_width:
+                    max_width = max(bar_widths)
+                return bar_widths, bar_ys, species_c_list
+
+            def _format_temp_depth_axes(self, col_end, col_start, depth_index, inner_gs, reef_index, row_end, row_start,
+                                        season_index):
+                temp_depth_ax = plt.subplot(inner_gs[row_start:row_end, col_start:col_end])
+                if season_index == 0:
+                    self._format_label_ax(temp_depth_ax, label=f'{self.depths[depth_index]}m')
+                else:
+                    self._format_label_ax(temp_depth_ax)
+                temp_depth_ax.set_xlim(0, 5.1)
+                if depth_index == 0 and reef_index == 0:
+                    temp_depth_ax.spines['top'].set_visible(True)
+                    ax2 = temp_depth_ax.twiny()
+                    ax2.set_xlim(0, 5.1)
+                    ax2.set_xticks([5])
+                    ax2.spines['right'].set_visible(False)
+                    ax2.spines['bottom'].set_visible(False)
+                    if season_index == 0:
+                        ax2.set_xlabel('winter', labelpad=-10, fontweight='bold')
+                    else:
+                        ax2.set_xlabel('summer', labelpad=-10, fontweight='bold')
+                temp_depth_ax.set_fc('lightgray')
+                return temp_depth_ax
+
+            def _get_inner_gs_indices(self, depth_index, reef_index, season_index):
+                row_start = reef_index * len(self.depths) + depth_index
+                row_end = row_start + self.depth_height
+                col_start = self.reef_type_width + self.reef_width + season_index * self.depth_width
+                col_end = col_start + self.depth_width
+                return col_end, col_start, row_end, row_start
+
+            def _setup_reef_axarr(self, i, inner_gs):
+                reef_axarr = []
+                for j in range(2):
+                    temp_reef_ax = plt.subplot(inner_gs[j * self.reef_height:(j * self.reef_height) + self.reef_height,
+                                               self.reef_type_width:self.reef_type_width + self.reef_width])
+                    self._format_label_ax(temp_reef_ax, label=self.reefs[((i - 1) * 2) + j])
+                    reef_axarr.append(temp_reef_ax)
+
+            def _setup_reef_type_axis(self, i, inner_gs):
+                reef_type_ax = plt.subplot(inner_gs[0:self.reef_type_height, 0:self.reef_type_width])
+                self._format_label_ax(reef_type_ax, label=self.reef_types[i - 1])
+
+            def _steup_inner_grid_spec_obj(self, i):
+                # set up the inner gs objects
+                if i == 1:
+                    inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
+                        self.inner_rows, self.inner_cols, subplot_spec=self.outer_gs[0:1, 1:2])
+                elif i == 2:
+                    inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
+                        self.inner_rows, self.inner_cols, subplot_spec=self.outer_gs[1:2, 0:1])
+                else:  # i == 3
+                    inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
+                        self.inner_rows, self.inner_cols, subplot_spec=self.outer_gs[1:2, 1:2])
+                return inner_gs
+
+            def _format_label_ax(self, ax, label=None):
                 ax.set_xlim(0, 1)
                 ax.set_ylim(0, 1)
                 ax.spines['top'].set_visible(False)
@@ -540,7 +635,8 @@ class RestrepoAnalysis:
                 ax.spines['bottom'].set_visible(False)
                 ax.set_xticks([])
                 ax.set_yticks([])
-                ax.set_ylabel(label, rotation='vertical', fontweight='bold')
+                if label is not None:
+                    ax.set_ylabel(label, rotation='vertical', fontweight='bold')
 
             def _reposition_small_map(self):
                 # now readjust position
@@ -634,6 +730,17 @@ class RestrepoAnalysis:
                 self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, self.site_labels[4])
                 # Fsar
                 self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, self.site_labels[5])
+                self.large_map_ax.plot(39.14, 22.57, 'k^', zorder=3)
+                self.large_map_ax.text(39.16, 22.57, 'Inshore', verticalalignment='center')
+                self.large_map_ax.plot(39.14, 22.51, 'ks', zorder=3)
+                self.large_map_ax.text(39.16, 22.51, 'Midshore', verticalalignment='center')
+                self.large_map_ax.plot(39.14, 22.45, 'ko', zorder=3)
+                self.large_map_ax.text(39.16, 22.45, 'Offshore', verticalalignment='center')
+                r1 = patches.Rectangle(
+                    xy=(39.10, 22.4), width=0.2, height=0.2, fill=True, facecolor='white', edgecolor='black', linewidth=1, zorder=2, alpha=0.4)
+                self.large_map_ax.add_patch(r1)
+                apples = 'asdf'
+
 
             def _draw_natural_earth_features_big_map(self, land_10m, ocean_10m):
                 """NB the RGB must be a tuple in a list and the R, G, B must be given as a value between 0 and 1"""
