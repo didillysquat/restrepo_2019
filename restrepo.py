@@ -453,21 +453,17 @@ class RestrepoAnalysis:
                 self.depths = [1, 15, 30]
                 self.seasons = ['winter', 'summer']
                 self.reefs = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
-                self.reef_types = ['onshore', 'midshore', 'offshore']
+                self.reef_types = ['Inshore', 'Midshelf', 'Offshore']
                 self.depth_height = 1
                 self.depth_width = 6
                 self.reef_height = 3 * self.depth_height
                 self.reef_width = 1
                 self.reef_type_height = 2 * self.reef_height
                 self.reef_type_width = 1
-                self.inner_height = len(self.depths) * len(self.reefs) * 1 / 3 * self.depth_height
-                self.inner_width = self.reef_width + self.reef_type_width + (len(self.seasons) * self.depth_width)
-                self.total_width = self.inner_width * 2
-                self.total_height = self.inner_height * 2
-                self.big_map_width = self.total_width / 2
-                self.big_map_height = self.total_height / 2
+                self.inner_rows = len(self.depths) * int(len(self.reefs) * 1 / 3) * self.depth_height
+                self.inner_cols = self.reef_width + self.reef_type_width + (len(self.seasons) * self.depth_width)
+                self.site_labels = ['Abu Madafi', "Shi'b Nazar", 'Al Fahal', 'Qita al-Kirsh', 'Tahla', 'Fsar']
                 self.outer_gs = gridspec.GridSpec(2, 2)
-                self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(3,3, subplot_spec=self.outer_gs[0:1,0:1])
                 # axes that we will be plotting on
                 self.large_map_ax = None
                 self.small_map_ax = None
@@ -485,6 +481,7 @@ class RestrepoAnalysis:
                 https://github.com/conda-forge/cartopy-feedstock/issues/36
                 """
 
+
                 for i in range(4): # for each of the major gridspaces
                     if i == 0: # then plot map
 
@@ -493,6 +490,57 @@ class RestrepoAnalysis:
                         self._draw_small_map()
 
                         self._reposition_small_map()
+                        
+                    # now draw the sampling balance boxes for each of the reef_types
+                    else:
+                        # then we are working on the nearshore
+
+                        # set up the inner gs objects
+                        if i == 1:
+                            inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
+                                self.inner_rows,self.inner_cols, subplot_spec=self.outer_gs[0:1,1:2])
+                        elif i == 2:
+                            inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
+                                self.inner_rows, self.inner_cols, subplot_spec=self.outer_gs[1:2,0:1])
+                        else: # i == 3
+                            inner_gs = self.inner_gs_map = gridspec.GridSpecFromSubplotSpec(
+                                self.inner_rows, self.inner_cols, subplot_spec=self.outer_gs[1:2, 1:2])
+
+                        # setup the axes of the inner gs objects
+                        reef_type_ax = plt.subplot(inner_gs[0:self.reef_type_height, 0:self.reef_type_width])
+                        self._format_label_ax(reef_type_ax, label=self.reef_types[i-1])
+
+                        reef_axarr = []
+                        for j in range(2):
+                            temp_reef_ax = plt.subplot(inner_gs[j*self.reef_height:(j*self.reef_height)+self.reef_height, self.reef_type_width:self.reef_type_width+self.reef_width])
+                            self._format_label_ax(temp_reef_ax, label=self.reefs[((i-1)*2)+j])
+                            reef_axarr.append(temp_reef_ax)
+
+
+                        # season and then reef index. each inner list will have three ax
+                        depth_winter_ax_arr = [[[] for _ in range(int(len(self.reefs)*1/3))] for _ in range(len(self.seasons))]
+                        for season_index in range(len(self.seasons)): # for each season
+                            for reef_index in range(2): # for each reef
+                                for depth_index in range(len(self.depths)): # for each depth
+                                    row_start = reef_index*len(self.depths) + depth_index
+                                    row_end = row_start + self.depth_height
+                                    col_start = self.reef_type_width + self.reef_width + season_index * self.depth_width
+                                    col_end = col_start + self.depth_width
+                                    temp_depth_ax = plt.subplot(inner_gs[row_start:row_end, col_start:col_end])
+                                    self._format_label_ax(temp_depth_ax, label=f'{self.depths[depth_index]}m')
+                                    depth_winter_ax_arr[season_index][reef_index].append(temp_depth_ax)
+
+                apples = 'asdf'
+
+            def _format_label_ax(self, ax, label):
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.spines['bottom'].set_visible(False)
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.set_ylabel(label, rotation='vertical', fontweight='bold')
 
             def _reposition_small_map(self):
                 # now readjust position
@@ -571,22 +619,21 @@ class RestrepoAnalysis:
             def _annotate_big_map(self):
                 x_site_coords = [38.778333, 38.854283, 38.960533, 38.992800, 39.055275, 39.030267, ]
                 y_site_coords = [22.109143, 22.322533, 22.306233, 22.430717, 22.308564, 22.232617, ]
-                site_labels = ['Abu Madafi', "Shi'b Nazar", 'Al Fahal', 'Qita al-Kirsh', 'Tahla', 'Fsar', ]
                 self.large_map_ax.plot(x_site_coords[:2], y_site_coords[:2], 'ko')
                 self.large_map_ax.plot(x_site_coords[2:4], y_site_coords[2:4], 'ks')
                 self.large_map_ax.plot(x_site_coords[4:6], y_site_coords[4:6], 'k^')
                 # Abu Madafi
-                self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, site_labels[0])
+                self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, self.site_labels[0])
                 # Shi'b Nazar
-                self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, site_labels[1])
+                self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, self.site_labels[1])
                 # Al Fahal
-                self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, site_labels[2])
+                self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, self.site_labels[2])
                 # Qita al-Kirsh
-                self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, site_labels[3])
+                self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, self.site_labels[3])
                 # Tahla
-                self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, site_labels[4])
+                self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, self.site_labels[4])
                 # Fsar
-                self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, site_labels[5])
+                self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, self.site_labels[5])
 
             def _draw_natural_earth_features_big_map(self, land_10m, ocean_10m):
                 """NB the RGB must be a tuple in a list and the R, G, B must be given as a value between 0 and 1"""
@@ -626,52 +673,6 @@ class RestrepoAnalysis:
         blfm.setup_plotting_space()
 
 
-
-        # map_width = total_width/2
-        # map_height = total_height/2
-        #
-        # gs = gridspec.GridSpec(total_height, total_width)
-        # map_top_left = True  # if False then bottom right
-        #
-        #
-        #
-        # species = ['M', 'G', 'GX', 'P', 'PC', 'SE', 'ST']
-        # species_full = ['M. dichotoma', 'G. planulata', 'G. fascicularis', 'Porites spp.',
-        #                            'P. verrucosa', 'S. hystrix', 'S. pistillata']
-
-
-        # # required for getting the bbox of the text annotations
-        # fig.canvas.draw()
-        #
-        #
-        # reef_type_axarr = []
-        # for i in range(len(reef_types)):
-        #     gs_start_reef_type = i*reef_type_height
-        #     gs_stop_reef_type = (i+1)*reef_type_height
-        #
-        #     reef_type_axarr.append(plt.subplot(gs[gs_start_reef_type:gs_stop_reef_type, 0:reef_type_width]))
-        #
-        # reef_axarr = []
-        # for i in range(len(reefs)):
-        #     gs_start_reef = i*reef_height
-        #     gs_stop_reef = (i+1)*reef_height
-        #     reef_axarr.append(plt.subplot(gs[gs_start_reef:gs_stop_reef, reef_type_width:reef_type_width+reef_width]))
-        #
-        # winter_axarr = []
-        # for i in range(len(depths) * len(reefs)):
-        #     gs_start_winter = i * depth_height
-        #     gs_stop_winter = (i+1) * depth_height
-        #     width_start_winter = reef_type_width+reef_width
-        #     width_stop_winter = reef_type_width+reef_width+depth_width
-        #     winter_axarr.append(plt.subplot(gs[gs_start_winter:gs_stop_winter, width_start_winter:width_stop_winter]))
-        #
-        # summer_axarr = []
-        # for i in range(len(depths) * len(reefs)):
-        #     gs_start_summer = i * depth_height
-        #     gs_stop_summer = (i + 1) * depth_height
-        #     width_start_summer = reef_type_width + reef_width + depth_width
-        #     width_stop_summer = reef_type_width + reef_width + depth_width + depth_width
-        #     summer_axarr.append(plt.subplot(gs[gs_start_summer:gs_stop_summer, width_start_summer:width_stop_summer]))
 
         apples = 'asdf'
 
