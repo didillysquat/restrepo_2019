@@ -39,7 +39,7 @@ Assess why the UniFrac distance approximation is not working so well
 import os
 import pandas as pd
 import matplotlib as mpl
-mpl.use('Agg')
+mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 import scipy.cluster.hierarchy
 import scipy.spatial.distance
@@ -69,6 +69,7 @@ class RestrepoAnalysis:
         # tackle this sepeately to the analysis of the A, C and D.
         self.cwd = os.path.dirname(os.path.realpath(__file__))
         self.clades = list('ACD')
+        self.clade_genera_labels = ['Symbiodinium', 'Cladocopium', 'Durisdinium']
         self.base_input_dir = base_input_dir
         self.ignore_cache=ignore_cache
         # Paths to raw info files
@@ -144,6 +145,12 @@ class RestrepoAnalysis:
         self.outputs_dir = os.path.join(self.cwd, 'outputs')
         os.makedirs(self.outputs_dir, exist_ok=True)
         self.uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, 'dss_at_uid_tups.tsv')
+        self.old_color_dict = {
+            'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
+            'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E', 1: '#CAE1FF', 15: '#2E37FE', 30: '#000080',
+            'Summer': '#FF0000', 'Winter': '#00BFFF', 'Inshore': '#FF0000',
+            'Midshelf': '#FFFF00', 'Offshore': '#008000', 'Al Fahal': '#98FB98', 'Abu Madafi': '#F0E68C',
+            'Qita al Kirsh': '#DDA0DD', 'Shib Nazar': '#8B008B', 'Tahla': '#00BFFF', 'Fsar': '#0000CD'}
 
     def _init_metadata_info_df(self, meta_info_path):
         """The matching of names between the SP output and the meta info that Alejandro was working from was causing us
@@ -382,64 +389,84 @@ class RestrepoAnalysis:
         self.profile_df = df
 
     def plot_pcoa_of_cladal(self):
-        # Do a quick check to see if the samples in the distance matrices are matching up with the samples
-        # from the
-
         from skbio.stats.ordination import pcoa
-        """ Here we will plot a series of PCoA for the sample distances and we will colour
+        class PCOAByClade:
+            """Cladd for plotting a series of PCoAs for the sample distances and we will colour
         them according to the meta info"""
-        fig = plt.figure(figsize=(15, 6))
-        # required for getting the bbox of the text annotations
-        fig.canvas.draw()
-        gs = gridspec.GridSpec(3, 5)
-        ax_arr = [[] for _ in range(3)]
-        meta_info_categories = list(self.metadata_info_df)
-        for j in range(len(self.clades)):  # for each clade
-            for i in range(len(meta_info_categories)):  # for each meta info category
-                temp_ax = plt.subplot(gs[j:j+1, i:i+1])
-                ax_arr[j].append(temp_ax)
-                temp_ax.set_xticks([])
-                temp_ax.set_yticks([])
-                temp_ax.set_facecolor('grey')
-                if j ==0: # if this is subplot in top row
-                    temp_ax.set_title(f'{meta_info_categories[i]}')
-                if i == 0: # if this is subplot in first column
-                    temp_ax.set_ylabel(f'{self.clades[j]}')
-                if j == 2: # if last row
-                    temp_ax.set_xlabel('PC1')
-                if i == 4: # if last column
-                    ax2 = temp_ax.twinx()
-                    ax2.set_yticks([])
-                    ax2.set_ylabel('PC2')
+            def __init__(self, parent):
+                self.parent = parent
+                self.fig = plt.figure(figsize=(15, 6))
+                self.gs = gridspec.GridSpec(3, 5)
+                self.ax_arr = [[] for _ in range(3)]
+                self.meta_info_categories = list(self.parent.metadata_info_df)
+                self._setup_axarr()
 
-        for j in range(len(self.clades)):  # for each clade
-            # We need to compute the pcoa coords for each clade. These will be the points plotted in the
-            # scatter for each of the different meta info for each clade
-            sample_clade_dist_df = self.sample_clade_dist_df_dict[self.clades[j]]
-            pcoa_output = pcoa(sample_clade_dist_df)
-            this = sum(pcoa_output.eigvals)
+                self.new_color_dict = {
+                    'G': (220,124,104), 'GX': (218,115,179), 'M': (203,0,254),
+                    'P': (178,68,255), 'PC': (115,108,254), 'SE': (79,153,254),
+                    'ST': (135,254,255),
+                    1: '#CAE1FF', 15: '#2E37FE', 30: '#000080',
+                    'Summer': '#FF0000', 'Winter': '#00BFFF',
+                    'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000',
+                    'Al Fahal':(93,174,142), 'Abu Madafi':(93,173,63), 'Qita al Kirsh':(102,189,4),
+                    'Shib Nazar': (170,192,7), 'Tahla':(193,157,6), 'Fsar':(217,106,11)}
 
-            for i in range(len(meta_info_categories)):
-                # Here is where we need to look at each sample and colour according to the meta categories
+            def _setup_axarr(self):
+                # axis setup
+                for j in range(len(self.parent.clades)):  # for each clade
+                    for i in range(len(self.meta_info_categories)):  # for each meta info category
+                        temp_ax = plt.subplot(self.gs[j:j + 1, i:i + 1])
+                        temp_ax.set_xticks([])
+                        temp_ax.set_yticks([])
+                        temp_ax.set_facecolor('gray')
+                        if j == 0:  # if this is subplot in top row
+                            temp_ax.set_title(f'{self.meta_info_categories[i]}', fontweight='bold')
+                        if i == 0:  # if this is subplot in first column
+                            temp_ax.set_ylabel(f'{self.parent.clade_genera_labels[j]}', fontweight='bold', fontstyle='italic')
+                        if j == 2:  # if last row
+                            temp_ax.set_xlabel('PC1')
+                        if i == 4:  # if last column
+                            ax2 = temp_ax.twinx()
+                            ax2.set_yticks([])
+                            ax2.set_ylabel('PC2')
+                        self.ax_arr[j].append(temp_ax)
 
-                color_dict = {
-                    'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
-                    'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E', 1: '#CAE1FF', 15: '#2E37FE', 30: '#000080',
-                    'Summer': '#FF0000', 'Winter': '#00BFFF','Inshore': '#FF0000',
-                    'Midshelf': '#FFFF00', 'Offshore': '#008000', 'Al Fahal':'#98FB98', 'Abu Madafi':'#F0E68C',
-                    'Qita al Kirsh':'#DDA0DD', 'Shib Nazar': '#8B008B', 'Tahla':'#00BFFF', 'Fsar':'#0000CD'}
+            def plot_PCOA(self):
+                for j in range(len(self.parent.clades)):  # for each clade
+                    # We need to compute the pcoa coords for each clade. These will be the points plotted in the
+                    # scatter for each of the different meta info for each clade
+                    sample_clade_dist_df = self.parent.sample_clade_dist_df_dict[self.parent.clades[j]]
+                    pcoa_output = pcoa(sample_clade_dist_df)
+                    eig_tots = sum(pcoa_output.eigvals)
+                    pc_one_var = pcoa_output.eigvals[0]/eig_tots
+                    pc_two_var = pcoa_output.eigvals[1]/eig_tots
 
-                species_category_list = ['M', 'G', 'GX', 'P', 'PC', 'SE', 'ST']
-                species_category_labels = ['M. dichotoma', 'G. planulata', 'G. fascicularis', 'Porites spp.',
-                                   'P. verrucosa', 'S. hystrix', 'S. pistillata']
-                color_list = []
-                for smp_uid in list(sample_clade_dist_df):
-                    color_list.append(color_dict[self.metadata_info_df.loc[smp_uid, meta_info_categories[i]]])
+                    for i in range(len(self.meta_info_categories)):
 
-                ax_arr[j][i].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'], marker='.', color=color_list, s=16)
-                spples = 'asdf'
-        apples = 'asdf'
-        plt.savefig(os.path.join(self.figure_dir, 'sample_annotated_ordination_no_legend.png'))
+                        color_list = []
+                        # if i in [0,1]:
+                        #     for smp_uid in list(sample_clade_dist_df):
+                        #         r,g,b = self.new_color_dict[self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]]
+                        #         color_list.append("#{0:02x}{1:02x}{2:02x}".format(r, g, b))
+                        # else:
+                        for smp_uid in list(sample_clade_dist_df):
+                            color_list.append(self.parent.old_color_dict[self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]])
+
+                        self.ax_arr[j][i].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'], marker='.', c=color_list, s=16)
+                        self._write_var_explained(i, j, pc_one_var, pc_two_var)
+                plt.savefig(os.path.join(self.parent.figure_dir, 'sample_annotated_ordination_no_legend.png'), dpi=1200)
+                apples = 'asdf'
+            def _write_var_explained(self, i, j, pc_one_var, pc_two_var):
+                if i == 0:
+                    x0, x1 = self.ax_arr[j][i].get_xlim()
+                    y0, y1 = self.ax_arr[j][i].get_ylim()
+                    height = y1-y0
+                    width = x1-x0
+                    text_x = x0 + 0.70 * width
+                    text_y = y0 - 0.1 * height
+                    self.ax_arr[j][i].text(x=text_x, y=text_y, s=f'({pc_one_var:.2f}, {pc_two_var:.2f})', fontsize='x-small')
+        pbc = PCOAByClade(parent=self)
+        pbc.plot_PCOA()
     def make_dendrogram_with_meta_all_clades_sample_dists(self):
         """ We will produce a similar figure to the one that we have already produced for the types."""
         raise NotImplementedError
@@ -454,9 +481,7 @@ class RestrepoAnalysis:
                 self.seasons = ['Winter', 'Summer']
                 self.reefs = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
                 self.reef_types = ['Inshore', 'Midshelf', 'Offshore']
-                self.species_color_dict = {
-                    'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
-                    'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
+
                 self.species_hatch_dict = {
                     'G': '+', 'GX': 'x', 'M': '\\', 'P': 'o',
                     'PC': '.', 'SE': '/', 'ST': 'O'}
@@ -566,7 +591,7 @@ class RestrepoAnalysis:
                     bar_width_dict[spec_cat] += len(rows_of_interest.index.values.tolist())
                 bar_widths = [bar_width_dict[spec_cat] for spec_cat in self.species_category_list]
                 species_c_list = [
-                    self.species_color_dict[spec_cat] for spec_cat in self.species_category_list]
+                    self.parent.old_color_dict[spec_cat] for spec_cat in self.species_category_list]
                 species_h_list = [
                     self.species_hatch_dict[spec_cat] for spec_cat in self.species_category_list]
                 if max(bar_widths) > max_width:
@@ -1621,8 +1646,9 @@ if __name__ == "__main__":
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
         ignore_cache=True, cutoff_abund=0.06)
     # rest_analysis.make_dendrogram_with_meta_all_clades()
-    rest_analysis.make_sample_balance_figure()
     rest_analysis.plot_pcoa_of_cladal()
+    rest_analysis.make_sample_balance_figure()
+
     rest_analysis.permute_profile_permanova()
     rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
