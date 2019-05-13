@@ -3,3 +3,4 @@ outputs/
 cache/
 figures/
 *.png
+.DS_Store

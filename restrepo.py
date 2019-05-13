@@ -151,6 +151,15 @@ class RestrepoAnalysis:
             'Summer': '#FF0000', 'Winter': '#00BFFF', 'Inshore': '#FF0000',
             'Midshelf': '#FFFF00', 'Offshore': '#008000', 'Al Fahal': '#98FB98', 'Abu Madafi': '#F0E68C',
             'Qita al Kirsh': '#DDA0DD', 'Shib Nazar': '#8B008B', 'Tahla': '#00BFFF', 'Fsar': '#0000CD'}
+        self.reefs = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
+
+        self.species_category_list = ['SE','PC', 'M', 'G', 'P','GX', 'ST']
+        self.species_category_labels = ['S. hystrix','P. verrucosa','M. dichotoma', 'G. planulata',
+                                        'Porites spp.','G. fascicularis', 'S. pistillata']
+        self.reef_types = ['Inshore', 'Midshelf', 'Offshore']
+        self.depths = [1, 15, 30]
+        self.seasons = ['Winter', 'Summer']
+
 
     def _init_metadata_info_df(self, meta_info_path):
         """The matching of names between the SP output and the meta info that Alejandro was working from was causing us
@@ -395,9 +404,10 @@ class RestrepoAnalysis:
         them according to the meta info"""
             def __init__(self, parent):
                 self.parent = parent
-                self.fig = plt.figure(figsize=(15, 6))
-                self.gs = gridspec.GridSpec(3, 5)
+                self.fig = plt.figure(figsize=(15, 8))
+                self.gs = gridspec.GridSpec(4, 5)
                 self.ax_arr = [[] for _ in range(3)]
+                self.leg_axarr = []
                 self.meta_info_categories = list(self.parent.metadata_info_df)
                 self._setup_axarr()
 
@@ -430,6 +440,61 @@ class RestrepoAnalysis:
                             ax2.set_yticks([])
                             ax2.set_ylabel('PC2')
                         self.ax_arr[j].append(temp_ax)
+
+                # Then add the legend axis array
+                # The x and y coordinates for the legen symbols can be set.
+                # the x can be 0.1. The Y should be aligned for all meta categories
+                # therefore we should set it according to the meta categorie with the largest number of levels.
+                # This is species with 7 levels.
+                x_vals = [0.1 for _ in range(7)]
+                y_vals = [y * 1/7  for y in range(7)]
+
+                for i in range(len(self.meta_info_categories)):
+                    temp_ax = plt.subplot(self.gs[3:4, i:i+1])
+                    temp_ax.set_ylim(-0.2,1)
+                    temp_ax.set_xlim(0,1)
+                    temp_ax.invert_yaxis()
+                    temp_ax.spines['top'].set_visible(False)
+                    temp_ax.spines['bottom'].set_visible(False)
+                    temp_ax.spines['right'].set_visible(False)
+                    temp_ax.spines['left'].set_visible(False)
+                    temp_ax.set_yticks([])
+                    temp_ax.set_xticks([])
+
+                    # Species
+                    if i == 0:
+                        colors = [self.parent.old_color_dict[s] for s in self.parent.species_category_list]
+                        temp_ax.scatter(x_vals, y_vals, color=colors)
+                        for x, y, label in zip(x_vals, y_vals, self.parent.species_category_labels):
+                            temp_ax.text(x=x + 0.1, y=y, s=label, verticalalignment='center', fontstyle='italic')
+                    # Reef
+                    elif i==1:
+                        colors = [self.parent.old_color_dict[r] for r in self.parent.reefs]
+                        temp_ax.scatter(x_vals[:6], y_vals[:6], color=colors)
+                        for x, y, label in zip(x_vals, y_vals, self.parent.reefs):
+                            temp_ax.text(x=x + 0.1, y=y, s=label, verticalalignment='center', fontstyle='italic')
+                    # Reef type
+                    elif i==2:
+                        colors = [self.parent.old_color_dict[r] for r in self.parent.reef_types]
+                        temp_ax.scatter(x_vals[:3], y_vals[:3], color=colors)
+                        for x, y, label in zip(x_vals, y_vals, self.parent.reef_types):
+                            temp_ax.text(x=x + 0.1, y=y, s=label, verticalalignment='center', fontstyle='italic')
+                    # Depth
+                    elif i==3:
+                        colors = [self.parent.old_color_dict[r] for r in self.parent.depths]
+                        temp_ax.scatter(x_vals[:3], y_vals[:3], color=colors)
+                        for x, y, label in zip(x_vals, y_vals, self.parent.depths):
+                            temp_ax.text(x=x + 0.1, y=y, s=f'{label}m', verticalalignment='center', fontstyle='italic')
+                    # Season
+                    elif i==4:
+                        colors = [self.parent.old_color_dict[r] for r in self.parent.seasons]
+                        temp_ax.scatter(x_vals[:2], y_vals[:2], color=colors)
+                        for x, y, label in zip(x_vals, y_vals, self.parent.seasons):
+                            temp_ax.text(x=x + 0.1, y=y, s=label, verticalalignment='center', fontstyle='italic')
+
+
+                apples = 'asdf'
+
 
             def plot_PCOA(self):
                 for j in range(len(self.parent.clades)):  # for each clade
@@ -512,6 +577,9 @@ class RestrepoAnalysis:
                 give up on this to. Instead, cartopy seems to be doing a great job. It was a little trickly to get
                 working. After doing its pip install I had to down grade the shapely module to 1.5.17. See:
                 https://github.com/conda-forge/cartopy-feedstock/issues/36
+                NB When I tried making a new environment I found that cartopy was broken again. The trick was to install
+                it using the conda install rather than pip as the pip install mas not installing some of the required
+                libraries. conda install cartopy.
                 """
 
                 max_width = 0
@@ -540,7 +608,6 @@ class RestrepoAnalysis:
 
                 print('saving fig')
                 plt.savefig(os.path.join(self.parent.figure_dir, 'map_balance.png'), dpi=1200)
-
 
                 apples = 'asdf'
 
@@ -1419,34 +1486,32 @@ class RestrepoAnalysis:
             meta_info_df_for_clade.to_csv(
                 path_or_buf=output_path_meta_info, sep=',', header=True, index=False, line_terminator='\n')
 
-            import rpy2.robjects as robjects
-            import rpy2.robjects.packages as rpackages
-            from rpy2.robjects.vectors import StrVector
-            package_names = ('vegan',)
+        apples = 'pies'
 
-            if all(rpackages.isinstalled(x) for x in package_names):
-                have_packages = True
-            else:
-                have_packages = False
+    def permute_sample_permanova(self):
+        meta_df = self.metadata_info_df
+        for clade in self.clades:
+            clade_sample_dist_df = self.sample_clade_dist_df_dict[clade]
+            output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}.csv')
+            clade_sample_dist_df.to_csv(path_or_buf=output_path_dist_matrix, sep=',', header=False, index=False, line_terminator='\n')
 
-            if not have_packages:
-                utils = rpackages.importr('utils')
-                utils.chooseCRANmirror(ind=1)
-                package_names_to_install = [x for x in package_names if not rpackages.isinstalled(x)]
-                if package_names_to_install:
-                    utils.install_packages(StrVector(package_names_to_install))
+            # we will also need to output the metainfo df for the analysis type instances in question
 
-            r_distance_data = robjects.r(f'read.table(file="/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/dists_permanova_types_A.csv", sep=",", header=FALSE)')
-            r_meta_info = robjects.r(f'read.table(file="/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/meta_info_A.csv", sep=",", header=TRUE)')
-            vegan = rpackages.importr('vegan')
+            meta_info_df_for_clade = meta_df.loc[clade_sample_dist_df.index.values.tolist(), :]
+            output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}.csv')
+            meta_info_df_for_clade.to_csv(
+                path_or_buf=output_path_meta_info, sep=',', header=True, index=False, line_terminator='\n')
 
-            perm_results = robjects.r('')
-            print(data)
+            # It looks as though we can compute permdisp directly in python.
+            # Although the permanova is still sadly lacking
+            dist_obj = skbio.stats.distance.DistanceMatrix(clade_sample_dist_df, ids=clade_sample_dist_df.index.values.tolist())
+            condensed_dist = scipy.spatial.distance.squareform(clade_sample_dist_df)
+            this = skbio.stats.distance.permdisp(distance_matrix=dist_obj, grouping=meta_info_df_for_clade['season'])
             apples = 'asdf'
 
 
 
-        apples = 'pies'
+        apples = 'asdf'
 
 class MetaInfoPlotter:
     def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_x_loc_dict, dend_ax, sub_cat_axarr, clade_index):
@@ -1646,7 +1711,9 @@ if __name__ == "__main__":
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
         ignore_cache=True, cutoff_abund=0.06)
     # rest_analysis.make_dendrogram_with_meta_all_clades()
-    rest_analysis.plot_pcoa_of_cladal()
+    # rest_analysis.plot_pcoa_of_cladal()
+    rest_analysis.permute_sample_permanova()
+
     rest_analysis.make_sample_balance_figure()
 
     rest_analysis.permute_profile_permanova()
