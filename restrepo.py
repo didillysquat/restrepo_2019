@@ -426,8 +426,14 @@ class RestrepoAnalysis:
             def __init__(self, parent):
                 self.parent = parent
                 self.fig = plt.figure(figsize=(15, 8))
-                self.gs = gridspec.GridSpec(4, 5)
-                self.ax_arr = [[] for _ in range(3)]
+                # one row for each clade, for the between sample ordinations
+                # one row for the clade proportion ordination
+                # one row for the legends
+                # one column per meta info category i.e. species, reef, reef_type, etc.
+                self.gs = gridspec.GridSpec(5, 5)
+                # axis for plotting the between sample ordinations
+                self.ax_arr = [[] for _ in range(4)]
+                self.clade_proportion_ax = []
                 self.leg_axarr = []
                 self.meta_info_categories = list(self.parent.metadata_info_df)
                 self.clade_proportion_df = pd.DataFrame(columns=list('ACD'),
@@ -518,8 +524,8 @@ class RestrepoAnalysis:
 
 
             def _setup_axarr(self):
-                # axis setup
-                for j in range(len(self.parent.clades)):  # for each clade
+                # axis setup for the between sample ordinations
+                for j in range(len(self.parent.clades) + 1):  # for each clade
                     for i in range(len(self.meta_info_categories)):  # for each meta info category
                         temp_ax = plt.subplot(self.gs[j:j + 1, i:i + 1])
                         temp_ax.set_xticks([])
@@ -528,8 +534,12 @@ class RestrepoAnalysis:
                         if j == 0:  # if this is subplot in top row
                             temp_ax.set_title(f'{self.meta_info_categories[i]}', fontweight='bold')
                         if i == 0:  # if this is subplot in first column
-                            temp_ax.set_ylabel(f'{self.parent.clade_genera_labels[j]}', fontweight='bold', fontstyle='italic')
-                        if j == 2:  # if last row
+                            if j == 3:
+                                # then this is the cladal proportion
+                                temp_ax.set_ylabel('clade_proportions', fontweight='bold', fontstyle='italic')
+                            else:
+                                temp_ax.set_ylabel(f'{self.parent.clade_genera_labels[j]}', fontweight='bold', fontstyle='italic')
+                        if j == 3:  # if last row
                             temp_ax.set_xlabel('PC1')
                         if i == 4:  # if last column
                             ax2 = temp_ax.twinx()
@@ -546,7 +556,7 @@ class RestrepoAnalysis:
                 y_vals = [y * 1/7  for y in range(7)]
 
                 for i in range(len(self.meta_info_categories)):
-                    temp_ax = plt.subplot(self.gs[3:4, i:i+1])
+                    temp_ax = plt.subplot(self.gs[4:5, i:i+1])
                     temp_ax.set_ylim(-0.2,1)
                     temp_ax.set_xlim(0,1)
                     temp_ax.invert_yaxis()
@@ -614,18 +624,38 @@ class RestrepoAnalysis:
                             color_list.append(self.parent.old_color_dict[self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]])
 
                         self.ax_arr[j][i].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'], marker='.', c=color_list, s=16)
-                        self._write_var_explained(i, j, pc_one_var, pc_two_var)
+                        self._write_var_explained(i, self.ax_arr[j][i], pc_one_var, pc_two_var)
+
+                # now plot up the clade_proportion ordination
+                prop_explained_tot = sum(self.clade_prop_pcoa_coords.loc['proportion_explained'])
+                for i in range(len(self.meta_info_categories)):
+                    pc_one_var = self.clade_prop_pcoa_coords['PC1'].iat[-1]/prop_explained_tot
+                    pc_two_var = self.clade_prop_pcoa_coords['PC2'].iat[-1]/prop_explained_tot
+                    color_list = []
+                    # if i in [0,1]:
+                    #     for smp_uid in list(sample_clade_dist_df):
+                    #         r,g,b = self.new_color_dict[self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]]
+                    #         color_list.append("#{0:02x}{1:02x}{2:02x}".format(r, g, b))
+                    # else:
+                    uid_list = self.clade_prop_pcoa_coords.index.values.tolist()[:-1]
+                    for smp_uid in uid_list:
+                        meta_value = self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]
+                        color_list.append(self.parent.old_color_dict[meta_value])
+
+                    self.ax_arr[3][i].scatter(x=self.clade_prop_pcoa_coords['PC1'][:-1], y=self.clade_prop_pcoa_coords['PC2'][:-1], marker='.',
+                                              c=color_list, s=16)
+                    self._write_var_explained(i, self.ax_arr[3][i], pc_one_var, pc_two_var)
                 plt.savefig(os.path.join(self.parent.figure_dir, 'sample_annotated_ordination_no_legend.png'), dpi=1200)
                 apples = 'asdf'
-            def _write_var_explained(self, i, j, pc_one_var, pc_two_var):
+            def _write_var_explained(self, i, ax, pc_one_var, pc_two_var):
                 if i == 0:
-                    x0, x1 = self.ax_arr[j][i].get_xlim()
-                    y0, y1 = self.ax_arr[j][i].get_ylim()
+                    x0, x1 = ax.get_xlim()
+                    y0, y1 = ax.get_ylim()
                     height = y1-y0
                     width = x1-x0
                     text_x = x0 + 0.70 * width
                     text_y = y0 - 0.1 * height
-                    self.ax_arr[j][i].text(x=text_x, y=text_y, s=f'({pc_one_var:.2f}, {pc_two_var:.2f})', fontsize='x-small')
+                    ax.text(x=text_x, y=text_y, s=f'({pc_one_var:.2f}, {pc_two_var:.2f})', fontsize='x-small')
         pbc = PCOAByClade(parent=self)
         pbc.plot_PCOA()
     def make_dendrogram_with_meta_all_clades_sample_dists(self):
