@@ -56,6 +56,8 @@ from cartopy.mpl.gridliner import Gridliner
 import matplotlib.ticker as mticker
 import cartopy.crs as ccrs
 import cartopy
+from scipy.spatial.distance import braycurtis
+import itertools
 
 
 class RestrepoAnalysis:
@@ -136,6 +138,8 @@ class RestrepoAnalysis:
             self.metadata_info_df = self._init_metadata_info_df(meta_data_input_path)
         else:
             self.metadata_info_df = None
+        self.seq_df = self._populate_seq_abund_df()
+
 
         # figures
         self.figure_dir = os.path.join(self.cwd, 'figures')
@@ -160,6 +164,23 @@ class RestrepoAnalysis:
         self.depths = [1, 15, 30]
         self.seasons = ['Winter', 'Summer']
 
+    def _populate_seq_abund_df(self):
+        with open(self.seq_rel_abund_ouput_path, 'r') as f:
+            seq_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
+
+        df = pd.DataFrame(seq_data)
+        df.iat[0,0] = 'sample_uid'
+        df.columns = df.iloc[0]
+        df.drop(index=0, inplace=True)
+        df.drop(columns='sample_name', inplace=True)
+        df.set_index('sample_uid', drop=True, inplace=True)
+        # Get rid of all of the superflous columns only leaving the seq rel counts
+        df = df.iloc[:, 20:]
+        df = df[:-5]
+        df.index = df.index.astype('int')
+
+
+        return df.astype('float')
 
     def _init_metadata_info_df(self, meta_info_path):
         """The matching of names between the SP output and the meta info that Alejandro was working from was causing us
@@ -409,7 +430,12 @@ class RestrepoAnalysis:
                 self.ax_arr = [[] for _ in range(3)]
                 self.leg_axarr = []
                 self.meta_info_categories = list(self.parent.metadata_info_df)
+                self.clade_proportion_df = pd.DataFrame(columns=list('ACD'),
+                                                        index=self.parent.seq_df.index.values.tolist())
+                self.clade_prop_pcoa_coords = None
+                self._create_clade_prop_distances()
                 self._setup_axarr()
+
 
                 self.new_color_dict = {
                     'G': (220,124,104), 'GX': (218,115,179), 'M': (203,0,254),
@@ -420,6 +446,76 @@ class RestrepoAnalysis:
                     'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000',
                     'Al Fahal':(93,174,142), 'Abu Madafi':(93,173,63), 'Qita al Kirsh':(102,189,4),
                     'Shib Nazar': (170,192,7), 'Tahla':(193,157,6), 'Fsar':(217,106,11)}
+
+            def _create_clade_prop_distances(self):
+                """Go through the self.parent.seq_df and get the proportion of A, C and D sequences
+                for each sample and populate this into the self.clade_proportion_df."""
+                sample_uids = self.clade_proportion_df.index.values.tolist()
+                if os.path.exists(os.path.join(self.parent.cache_dir, 'clade_proportion_df.p')):
+                    self.clade_proportion_df = pickle.load(open(os.path.join(self.parent.cache_dir, 'clade_proportion_df.p'), 'rb'))
+                else:
+                    for sample_uid in sample_uids:
+                        print(f'Counting clade abundances for sample {sample_uid}')
+                        sample_series = self.parent.seq_df.loc[sample_uid]
+                        clade_prop_dict = {'A':0.0, 'C':0.0, 'D':0.0}
+                        for seq_name in sample_series.index.values.tolist():
+                            if 'A' in seq_name:
+                                clade_prop_dict['A'] += sample_series[seq_name]
+                            elif 'C' in seq_name:
+                                clade_prop_dict['C'] += sample_series[seq_name]
+                            elif 'D' in seq_name:
+                                clade_prop_dict['D'] += sample_series[seq_name]
+                        # here we have the totals of the seqs for a given sample separated by clades
+                        self.clade_proportion_df.at[sample_uid, 'A'] = int(clade_prop_dict['A'] * 100000)
+                        self.clade_proportion_df.at[sample_uid, 'C'] = int(clade_prop_dict['C'] * 100000)
+                        self.clade_proportion_df.at[sample_uid, 'D'] = int(clade_prop_dict['D'] * 100000)
+                    pickle.dump(self.clade_proportion_df, open(os.path.join(self.parent.cache_dir, 'clade_proportion_df.p'), 'wb'))
+
+
+                # populate a dictionary that will hold the distances between each of the samples
+                if os.path.exists(os.path.join(self.parent.cache_dir, 'clade_prop_distance_dict.p')):
+                    clade_prop_distance_dict = pickle.load(
+                        open(os.path.join(self.parent.cache_dir, 'clade_prop_distance_dict.p'), 'rb'))
+                else:
+                    clade_prop_distance_dict = {}
+                    tot = len(sample_uids) * len(sample_uids)
+                    count = 0
+                    for uid_one, uid_two in itertools.combinations(sample_uids, 2):
+                        count += 1
+                        sys.stdout.write(f'\r{str(count)}/{tot}')
+                        distance = braycurtis(self.clade_proportion_df.loc[uid_one].values.tolist(), self.clade_proportion_df.loc[uid_two].values.tolist())
+                        clade_prop_distance_dict[frozenset({uid_one, uid_two})] = distance
+                    pickle.dump(clade_prop_distance_dict,
+                                open(os.path.join(self.parent.cache_dir, 'clade_prop_distance_dict.p'), 'wb'))
+
+                dist_file_as_list = []
+                for uid_outer in sample_uids:
+                    temp_at_string=[]
+
+                    for uid_inner in sample_uids:
+                        if uid_outer == uid_inner:
+                            temp_at_string.append(0)
+                        else:
+                            temp_at_string.append(
+                                clade_prop_distance_dict[frozenset({uid_outer, uid_inner})])
+                    dist_file_as_list.append(temp_at_string)
+
+                pcoa_output = pcoa(np.array(dist_file_as_list))
+
+
+                # rename the pcoa dataframe index as the sample uids
+                pcoa_output.samples['sample_uid'] = sample_uids
+                renamed_pcoa_dataframe = pcoa_output.samples.set_index('sample_uid')
+
+                # now add the variance explained as a final row to the renamed_dataframe
+                self.clade_prop_pcoa_coords = renamed_pcoa_dataframe.append(
+                    pcoa_output.proportion_explained.rename('proportion_explained'))
+
+                self.clade_prop_pcoa_coords.to_csv(
+                    os.path.join(self.parent.outputs_dir, 'sample_clade_props_pcoa_coords.csv'),
+                    index=True, header=True, sep=',')
+
+
 
             def _setup_axarr(self):
                 # axis setup
@@ -1711,13 +1807,13 @@ if __name__ == "__main__":
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
         ignore_cache=True, cutoff_abund=0.06)
     # rest_analysis.make_dendrogram_with_meta_all_clades()
-    # rest_analysis.plot_pcoa_of_cladal()
-    rest_analysis.permute_sample_permanova()
+    rest_analysis.plot_pcoa_of_cladal()
+    # rest_analysis.permute_sample_permanova()
 
-    rest_analysis.make_sample_balance_figure()
+    # rest_analysis.make_sample_balance_figure()
 
-    rest_analysis.permute_profile_permanova()
-    rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
+    # rest_analysis.permute_profile_permanova()
+    # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     rest_analysis.histogram_of_all_abundance_values()
 
 
