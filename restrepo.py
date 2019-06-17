@@ -133,12 +133,13 @@ class RestrepoAnalysis:
         else:
             self.cutoff_abund = cutoff_abund
             self.prof_df_cutoff = None
+        self.seq_df = self._populate_seq_abund_df()
         # metadata_info_df
         if meta_data_input_path is not None:
             self.metadata_info_df = self._init_metadata_info_df(meta_data_input_path)
         else:
             self.metadata_info_df = None
-        self.seq_df = self._populate_seq_abund_df()
+
 
 
         # figures
@@ -252,6 +253,7 @@ class RestrepoAnalysis:
         # delete 'FS15SE8_FS15SE8_N705-S508' from the df
         for uid, name in self.smp_uid_to_name_dict.items():
             if name == 'FS15SE8_FS15SE8_N705-S508':
+                self.seq_df.drop(index=uid, inplace=True)
                 self.profile_df.drop(index=uid, inplace=True)
                 if self.prof_df_cutoff is not None:
                     self.prof_df_cutoff.drop(index=uid, inplace=True)
