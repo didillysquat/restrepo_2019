@@ -529,7 +529,7 @@ class RestrepoAnalysis:
             them according to the meta info"""
             def __init__(self, parent):
                 self.parent = parent
-                self.fig = plt.figure(figsize=(8, 11))
+                self.fig = plt.figure(figsize=(8, 8))
                 # one row for each clade, for the between sample ordinations
                 # one row for the clade proportion ordination
                 # one row for the legends
@@ -647,7 +647,7 @@ class RestrepoAnalysis:
 
                     self.ax_arr[i][3].scatter(x=self.parent.clade_prop_pcoa_coords['PC1'][:-1],
                                               y=self.parent.clade_prop_pcoa_coords['PC2'][:-1], marker='.',
-                                              c=color_list, s=16)
+                                              c=color_list, s=40, alpha=0.7, edgecolors='none')
                     self._write_var_explained(i, self.ax_arr[i][3], pc_one_var, pc_two_var)
 
             def _plot_per_clade_ordinations(self):
@@ -673,7 +673,7 @@ class RestrepoAnalysis:
                                 smp_uid, self.meta_info_categories[i]]])
 
                         self.ax_arr[i][j].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'],
-                                                  marker='.', c=color_list, s=16)
+                                                  marker='.', c=color_list, s=40, alpha=0.7, edgecolors='none')
                         self._write_var_explained(i, self.ax_arr[i][j], pc_one_var, pc_two_var)
 
             def _write_var_explained(self, i, ax, pc_one_var, pc_two_var):
@@ -1873,7 +1873,7 @@ if __name__ == "__main__":
 
     # rest_analysis.permute_profile_permanova()
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
-    rest_analysis.histogram_of_all_abundance_values()
+    # rest_analysis.histogram_of_all_abundance_values()
 
 
 
