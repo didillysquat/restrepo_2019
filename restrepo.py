@@ -58,6 +58,7 @@ import cartopy.crs as ccrs
 import cartopy
 from scipy.spatial.distance import braycurtis
 import itertools
+from skbio.stats.ordination import pcoa
 
 
 class RestrepoAnalysis:
@@ -99,7 +100,15 @@ class RestrepoAnalysis:
             'D': os.path.join(self.base_input_dir, clade_D_smpl_dist_path)
         }
 
-        # Iterative attributes
+        # figures paths
+        self.figure_dir = os.path.join(self.cwd, 'figures')
+        os.makedirs(self.figure_dir, exist_ok=True)
+
+        # output paths
+        self.outputs_dir = os.path.join(self.cwd, 'outputs')
+        os.makedirs(self.outputs_dir, exist_ok=True)
+        self.uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, 'dss_at_uid_tups.tsv')
+
 
         # cache implementation
         self.cache_dir = os.path.join(self.cwd, 'cache')
@@ -107,6 +116,7 @@ class RestrepoAnalysis:
         self.profile_clade_dist_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_df_dict.p')
         self.profile_clade_dist_cct_specific_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_cct_specific_dict.p')
         self.sample_clade_dist_dict_p_path = os.path.join(self.cache_dir, 'sample_clade_dist_df_dict.p')
+
         # Info containers
         self.smp_uid_to_name_dict = None
         self.smp_name_to_uid_dict = None
@@ -133,23 +143,23 @@ class RestrepoAnalysis:
         else:
             self.cutoff_abund = cutoff_abund
             self.prof_df_cutoff = None
+
+        # sequence abundnace df
         self.seq_df = self._populate_seq_abund_df()
+
         # metadata_info_df
         if meta_data_input_path is not None:
             self.metadata_info_df = self._init_metadata_info_df(meta_data_input_path)
         else:
             self.metadata_info_df = None
 
+        # clade proportion dfs (must be made after meta_data)
+        self.clade_proportion_df = pd.DataFrame(columns=list('ACD'),
+                                                index=self.seq_df.index.values.tolist())
+        self.clade_prop_pcoa_coords = None
+        self._create_clade_prop_distances()
 
-
-        # figures
-        self.figure_dir = os.path.join(self.cwd, 'figures')
-        os.makedirs(self.figure_dir, exist_ok=True)
-
-        # output paths
-        self.outputs_dir = os.path.join(self.cwd, 'outputs')
-        os.makedirs(self.outputs_dir, exist_ok=True)
-        self.uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, 'dss_at_uid_tups.tsv')
+        # info dictionaries
         self.old_color_dict = {
             'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
             'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E', 1: '#CAE1FF', 15: '#2E37FE', 30: '#000080',
@@ -164,6 +174,99 @@ class RestrepoAnalysis:
         self.reef_types = ['Inshore', 'Midshelf', 'Offshore']
         self.depths = [1, 15, 30]
         self.seasons = ['Winter', 'Summer']
+
+    def _if_clade_proportion_df_cache_exists(self):
+        return os.path.exists(os.path.join(self.cache_dir, 'clade_proportion_df.p'))
+
+    def _if_clade_proportion_distance_dict_chache_exists(self):
+        return os.path.exists(os.path.join(self.cache_dir, 'clade_prop_distance_dict.p'))
+
+    def _create_clade_prop_distances(self):
+        """Go through the self.parent.seq_df and get the proportion of A, C and D sequences
+        for each sample and populate this into the self.clade_proportion_df."""
+        sample_uids = self.clade_proportion_df.index.values.tolist()
+        if self._if_clade_proportion_df_cache_exists():
+            self._set_clade_proportion_df_from_cache()
+        else:
+            self._set_clade_proportion_df_from_scratch(sample_uids)
+
+        # populate a dictionary that will hold the distances between each of the samples
+        if self._if_clade_proportion_distance_dict_chache_exists():
+            clade_prop_distance_dict = self._set_clade_proportion_distance_dict_from_chache()
+        else:
+            clade_prop_distance_dict = self._set_clade_make_clade_proportion_distance_dict_from_scratch(sample_uids)
+
+        dist_file_as_list = self._make_clade_prop_distance_matrix_2dlist(clade_prop_distance_dict, sample_uids)
+
+        self._clade_proportion_pcoa_coords_df(dist_file_as_list, sample_uids)
+
+    def _clade_proportion_pcoa_coords_df(self, dist_file_as_list, sample_uids):
+        pcoa_output = pcoa(np.array(dist_file_as_list))
+        # rename the pcoa dataframe index as the sample uids
+        pcoa_output.samples['sample_uid'] = sample_uids
+        renamed_pcoa_dataframe = pcoa_output.samples.set_index('sample_uid')
+        # now add the variance explained as a final row to the renamed_dataframe
+        self.clade_prop_pcoa_coords = renamed_pcoa_dataframe.append(
+            pcoa_output.proportion_explained.rename('proportion_explained'))
+        self.clade_prop_pcoa_coords.to_csv(
+            os.path.join(self.outputs_dir, 'sample_clade_props_pcoa_coords.csv'),
+            index=True, header=True, sep=',')
+
+    def _make_clade_prop_distance_matrix_2dlist(self, clade_prop_distance_dict, sample_uids):
+        dist_file_as_list = []
+        for uid_outer in sample_uids:
+            temp_at_string = []
+
+            for uid_inner in sample_uids:
+                if uid_outer == uid_inner:
+                    temp_at_string.append(0)
+                else:
+                    temp_at_string.append(
+                        clade_prop_distance_dict[frozenset({uid_outer, uid_inner})])
+            dist_file_as_list.append(temp_at_string)
+        return dist_file_as_list
+
+    def _set_clade_make_clade_proportion_distance_dict_from_scratch(self, sample_uids):
+        clade_prop_distance_dict = {}
+        tot = len(sample_uids) * len(sample_uids)
+        count = 0
+        for uid_one, uid_two in itertools.combinations(sample_uids, 2):
+            count += 1
+            sys.stdout.write(f'\r{str(count)}/{tot}')
+            distance = braycurtis(self.clade_proportion_df.loc[uid_one].values.tolist(),
+                                  self.clade_proportion_df.loc[uid_two].values.tolist())
+            clade_prop_distance_dict[frozenset({uid_one, uid_two})] = distance
+        pickle.dump(clade_prop_distance_dict,
+                    open(os.path.join(self.cache_dir, 'clade_prop_distance_dict.p'), 'wb'))
+        return clade_prop_distance_dict
+
+    def _set_clade_proportion_distance_dict_from_chache(self):
+        clade_prop_distance_dict = pickle.load(
+            open(os.path.join(self.cache_dir, 'clade_prop_distance_dict.p'), 'rb'))
+        return clade_prop_distance_dict
+
+    def _set_clade_proportion_df_from_scratch(self, sample_uids):
+        for sample_uid in sample_uids:
+            print(f'Counting clade abundances for sample {sample_uid}')
+            sample_series = self.seq_df.loc[sample_uid]
+            clade_prop_dict = {'A': 0.0, 'C': 0.0, 'D': 0.0}
+            for seq_name in sample_series.index.values.tolist():
+                if 'A' in seq_name:
+                    clade_prop_dict['A'] += sample_series[seq_name]
+                elif 'C' in seq_name:
+                    clade_prop_dict['C'] += sample_series[seq_name]
+                elif 'D' in seq_name:
+                    clade_prop_dict['D'] += sample_series[seq_name]
+            # here we have the totals of the seqs for a given sample separated by clades
+            self.clade_proportion_df.at[sample_uid, 'A'] = int(clade_prop_dict['A'] * 100000)
+            self.clade_proportion_df.at[sample_uid, 'C'] = int(clade_prop_dict['C'] * 100000)
+            self.clade_proportion_df.at[sample_uid, 'D'] = int(clade_prop_dict['D'] * 100000)
+        pickle.dump(self.clade_proportion_df,
+                    open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'wb'))
+
+    def _set_clade_proportion_df_from_cache(self):
+        self.clade_proportion_df = pickle.load(
+            open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'rb'))
 
     def _populate_seq_abund_df(self):
         with open(self.seq_rel_abund_ouput_path, 'r') as f:
@@ -421,10 +524,9 @@ class RestrepoAnalysis:
         self.profile_df = df
 
     def plot_pcoa_of_cladal(self):
-        from skbio.stats.ordination import pcoa
         class PCOAByClade:
             """Cladd for plotting a series of PCoAs for the sample distances and we will colour
-        them according to the meta info"""
+            them according to the meta info"""
             def __init__(self, parent):
                 self.parent = parent
                 self.fig = plt.figure(figsize=(15, 8))
@@ -438,92 +540,8 @@ class RestrepoAnalysis:
                 self.clade_proportion_ax = []
                 self.leg_axarr = []
                 self.meta_info_categories = list(self.parent.metadata_info_df)
-                self.clade_proportion_df = pd.DataFrame(columns=list('ACD'),
-                                                        index=self.parent.seq_df.index.values.tolist())
-                self.clade_prop_pcoa_coords = None
-                self._create_clade_prop_distances()
+
                 self._setup_axarr()
-
-
-                self.new_color_dict = {
-                    'G': (220,124,104), 'GX': (218,115,179), 'M': (203,0,254),
-                    'P': (178,68,255), 'PC': (115,108,254), 'SE': (79,153,254),
-                    'ST': (135,254,255),
-                    1: '#CAE1FF', 15: '#2E37FE', 30: '#000080',
-                    'Summer': '#FF0000', 'Winter': '#00BFFF',
-                    'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000',
-                    'Al Fahal':(93,174,142), 'Abu Madafi':(93,173,63), 'Qita al Kirsh':(102,189,4),
-                    'Shib Nazar': (170,192,7), 'Tahla':(193,157,6), 'Fsar':(217,106,11)}
-
-            def _create_clade_prop_distances(self):
-                """Go through the self.parent.seq_df and get the proportion of A, C and D sequences
-                for each sample and populate this into the self.clade_proportion_df."""
-                sample_uids = self.clade_proportion_df.index.values.tolist()
-                if os.path.exists(os.path.join(self.parent.cache_dir, 'clade_proportion_df.p')):
-                    self.clade_proportion_df = pickle.load(open(os.path.join(self.parent.cache_dir, 'clade_proportion_df.p'), 'rb'))
-                else:
-                    for sample_uid in sample_uids:
-                        print(f'Counting clade abundances for sample {sample_uid}')
-                        sample_series = self.parent.seq_df.loc[sample_uid]
-                        clade_prop_dict = {'A':0.0, 'C':0.0, 'D':0.0}
-                        for seq_name in sample_series.index.values.tolist():
-                            if 'A' in seq_name:
-                                clade_prop_dict['A'] += sample_series[seq_name]
-                            elif 'C' in seq_name:
-                                clade_prop_dict['C'] += sample_series[seq_name]
-                            elif 'D' in seq_name:
-                                clade_prop_dict['D'] += sample_series[seq_name]
-                        # here we have the totals of the seqs for a given sample separated by clades
-                        self.clade_proportion_df.at[sample_uid, 'A'] = int(clade_prop_dict['A'] * 100000)
-                        self.clade_proportion_df.at[sample_uid, 'C'] = int(clade_prop_dict['C'] * 100000)
-                        self.clade_proportion_df.at[sample_uid, 'D'] = int(clade_prop_dict['D'] * 100000)
-                    pickle.dump(self.clade_proportion_df, open(os.path.join(self.parent.cache_dir, 'clade_proportion_df.p'), 'wb'))
-
-
-                # populate a dictionary that will hold the distances between each of the samples
-                if os.path.exists(os.path.join(self.parent.cache_dir, 'clade_prop_distance_dict.p')):
-                    clade_prop_distance_dict = pickle.load(
-                        open(os.path.join(self.parent.cache_dir, 'clade_prop_distance_dict.p'), 'rb'))
-                else:
-                    clade_prop_distance_dict = {}
-                    tot = len(sample_uids) * len(sample_uids)
-                    count = 0
-                    for uid_one, uid_two in itertools.combinations(sample_uids, 2):
-                        count += 1
-                        sys.stdout.write(f'\r{str(count)}/{tot}')
-                        distance = braycurtis(self.clade_proportion_df.loc[uid_one].values.tolist(), self.clade_proportion_df.loc[uid_two].values.tolist())
-                        clade_prop_distance_dict[frozenset({uid_one, uid_two})] = distance
-                    pickle.dump(clade_prop_distance_dict,
-                                open(os.path.join(self.parent.cache_dir, 'clade_prop_distance_dict.p'), 'wb'))
-
-                dist_file_as_list = []
-                for uid_outer in sample_uids:
-                    temp_at_string=[]
-
-                    for uid_inner in sample_uids:
-                        if uid_outer == uid_inner:
-                            temp_at_string.append(0)
-                        else:
-                            temp_at_string.append(
-                                clade_prop_distance_dict[frozenset({uid_outer, uid_inner})])
-                    dist_file_as_list.append(temp_at_string)
-
-                pcoa_output = pcoa(np.array(dist_file_as_list))
-
-
-                # rename the pcoa dataframe index as the sample uids
-                pcoa_output.samples['sample_uid'] = sample_uids
-                renamed_pcoa_dataframe = pcoa_output.samples.set_index('sample_uid')
-
-                # now add the variance explained as a final row to the renamed_dataframe
-                self.clade_prop_pcoa_coords = renamed_pcoa_dataframe.append(
-                    pcoa_output.proportion_explained.rename('proportion_explained'))
-
-                self.clade_prop_pcoa_coords.to_csv(
-                    os.path.join(self.parent.outputs_dir, 'sample_clade_props_pcoa_coords.csv'),
-                    index=True, header=True, sep=',')
-
-
 
             def _setup_axarr(self):
                 # axis setup for the between sample ordinations
@@ -605,14 +623,40 @@ class RestrepoAnalysis:
 
 
             def plot_PCOA(self):
+                self._plot_per_clade_ordinations()
+
+                self._plot_clade_proportion_ordinations()
+
+                plt.savefig(os.path.join(self.parent.figure_dir, 'ordination_figure.png'), dpi=1200)
+                apples = 'asdf'
+
+            def _plot_clade_proportion_ordinations(self):
+                # now plot up the clade_proportion ordination
+                prop_explained_tot = sum(self.parent.clade_prop_pcoa_coords.loc['proportion_explained'])
+                for i in range(len(self.meta_info_categories)):
+                    pc_one_var = self.parent.clade_prop_pcoa_coords['PC1'].iat[-1] / prop_explained_tot
+                    pc_two_var = self.parent.clade_prop_pcoa_coords['PC2'].iat[-1] / prop_explained_tot
+                    color_list = []
+
+                    uid_list = self.parent.clade_prop_pcoa_coords.index.values.tolist()[:-1]
+                    for smp_uid in uid_list:
+                        meta_value = self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]
+                        color_list.append(self.parent.old_color_dict[meta_value])
+
+                    self.ax_arr[3][i].scatter(x=self.parent.clade_prop_pcoa_coords['PC1'][:-1],
+                                              y=self.parent.clade_prop_pcoa_coords['PC2'][:-1], marker='.',
+                                              c=color_list, s=16)
+                    self._write_var_explained(i, self.ax_arr[3][i], pc_one_var, pc_two_var)
+
+            def _plot_per_clade_ordinations(self):
                 for j in range(len(self.parent.clades)):  # for each clade
                     # We need to compute the pcoa coords for each clade. These will be the points plotted in the
                     # scatter for each of the different meta info for each clade
                     sample_clade_dist_df = self.parent.sample_clade_dist_df_dict[self.parent.clades[j]]
                     pcoa_output = pcoa(sample_clade_dist_df)
                     eig_tots = sum(pcoa_output.eigvals)
-                    pc_one_var = pcoa_output.eigvals[0]/eig_tots
-                    pc_two_var = pcoa_output.eigvals[1]/eig_tots
+                    pc_one_var = pcoa_output.eigvals[0] / eig_tots
+                    pc_two_var = pcoa_output.eigvals[1] / eig_tots
 
                     for i in range(len(self.meta_info_categories)):
 
@@ -623,32 +667,13 @@ class RestrepoAnalysis:
                         #         color_list.append("#{0:02x}{1:02x}{2:02x}".format(r, g, b))
                         # else:
                         for smp_uid in list(sample_clade_dist_df):
-                            color_list.append(self.parent.old_color_dict[self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]])
+                            color_list.append(self.parent.old_color_dict[self.parent.metadata_info_df.loc[
+                                smp_uid, self.meta_info_categories[i]]])
 
-                        self.ax_arr[j][i].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'], marker='.', c=color_list, s=16)
+                        self.ax_arr[j][i].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'],
+                                                  marker='.', c=color_list, s=16)
                         self._write_var_explained(i, self.ax_arr[j][i], pc_one_var, pc_two_var)
 
-                # now plot up the clade_proportion ordination
-                prop_explained_tot = sum(self.clade_prop_pcoa_coords.loc['proportion_explained'])
-                for i in range(len(self.meta_info_categories)):
-                    pc_one_var = self.clade_prop_pcoa_coords['PC1'].iat[-1]/prop_explained_tot
-                    pc_two_var = self.clade_prop_pcoa_coords['PC2'].iat[-1]/prop_explained_tot
-                    color_list = []
-                    # if i in [0,1]:
-                    #     for smp_uid in list(sample_clade_dist_df):
-                    #         r,g,b = self.new_color_dict[self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]]
-                    #         color_list.append("#{0:02x}{1:02x}{2:02x}".format(r, g, b))
-                    # else:
-                    uid_list = self.clade_prop_pcoa_coords.index.values.tolist()[:-1]
-                    for smp_uid in uid_list:
-                        meta_value = self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]
-                        color_list.append(self.parent.old_color_dict[meta_value])
-
-                    self.ax_arr[3][i].scatter(x=self.clade_prop_pcoa_coords['PC1'][:-1], y=self.clade_prop_pcoa_coords['PC2'][:-1], marker='.',
-                                              c=color_list, s=16)
-                    self._write_var_explained(i, self.ax_arr[3][i], pc_one_var, pc_two_var)
-                plt.savefig(os.path.join(self.parent.figure_dir, 'sample_annotated_ordination_no_legend.png'), dpi=1200)
-                apples = 'asdf'
             def _write_var_explained(self, i, ax, pc_one_var, pc_two_var):
                 if i == 0:
                     x0, x1 = ax.get_xlim()
