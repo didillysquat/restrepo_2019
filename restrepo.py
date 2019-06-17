@@ -529,14 +529,14 @@ class RestrepoAnalysis:
             them according to the meta info"""
             def __init__(self, parent):
                 self.parent = parent
-                self.fig = plt.figure(figsize=(15, 8))
+                self.fig = plt.figure(figsize=(8, 11))
                 # one row for each clade, for the between sample ordinations
                 # one row for the clade proportion ordination
                 # one row for the legends
                 # one column per meta info category i.e. species, reef, reef_type, etc.
                 self.gs = gridspec.GridSpec(5, 5)
                 # axis for plotting the between sample ordinations
-                self.ax_arr = [[] for _ in range(4)]
+                self.ax_arr = [[] for _ in range(5)]
                 self.clade_proportion_ax = []
                 self.leg_axarr = []
                 self.meta_info_categories = list(self.parent.metadata_info_df)
@@ -545,26 +545,27 @@ class RestrepoAnalysis:
 
             def _setup_axarr(self):
                 # axis setup for the between sample ordinations
-                for j in range(len(self.parent.clades) + 1):  # for each clade
-                    for i in range(len(self.meta_info_categories)):  # for each meta info category
+                for j in range(len(self.meta_info_categories)):  # for each meta info category
+                    for i in range(len(self.parent.clades) + 1):  # each clade and the clade prop ordination
                         temp_ax = plt.subplot(self.gs[j:j + 1, i:i + 1])
                         temp_ax.set_xticks([])
                         temp_ax.set_yticks([])
                         temp_ax.set_facecolor('gray')
                         if j == 0:  # if this is subplot in top row
-                            temp_ax.set_title(f'{self.meta_info_categories[i]}', fontweight='bold')
-                        if i == 0:  # if this is subplot in first column
-                            if j == 3:
-                                # then this is the cladal proportion
-                                temp_ax.set_ylabel('clade_proportions', fontweight='bold', fontstyle='italic')
+                            if i == 3:
+                                temp_ax.set_title('Genera proportions', fontweight='bold', fontsize='x-small', )
                             else:
-                                temp_ax.set_ylabel(f'{self.parent.clade_genera_labels[j]}', fontweight='bold', fontstyle='italic')
-                        if j == 3:  # if last row
-                            temp_ax.set_xlabel('PC1')
-                        if i == 4:  # if last column
+                                temp_ax.set_title(f'{self.parent.clade_genera_labels[i]}', fontweight='bold', fontsize='small', fontstyle='italic')
+                        if i == 0:  # if this is subplot in first column
+                            # then this is the cladal proportion
+                            temp_ax.set_ylabel(self.meta_info_categories[j], fontweight='bold', fontsize='small')
+
+                        if j == 4:  # if last row
+                            temp_ax.set_xlabel('PC1', fontsize='x-small')
+                        if i == 3:  # if last column
                             ax2 = temp_ax.twinx()
                             ax2.set_yticks([])
-                            ax2.set_ylabel('PC2')
+                            ax2.set_ylabel('PC2', fontsize='x-small')
                         self.ax_arr[j].append(temp_ax)
 
                 # Then add the legend axis array
@@ -573,10 +574,11 @@ class RestrepoAnalysis:
                 # therefore we should set it according to the meta categorie with the largest number of levels.
                 # This is species with 7 levels.
                 x_vals = [0.1 for _ in range(7)]
-                y_vals = [y * 1/7  for y in range(7)]
+                y_vals_odd = [y * 1/7  for y in range(7)]
+                y_vals_even = [y * 1/8  for y in range(8)]
 
                 for i in range(len(self.meta_info_categories)):
-                    temp_ax = plt.subplot(self.gs[4:5, i:i+1])
+                    temp_ax = plt.subplot(self.gs[i:i+1, 4:5])
                     temp_ax.set_ylim(-0.2,1)
                     temp_ax.set_xlim(0,1)
                     temp_ax.invert_yaxis()
@@ -590,32 +592,32 @@ class RestrepoAnalysis:
                     # Species
                     if i == 0:
                         colors = [self.parent.old_color_dict[s] for s in self.parent.species_category_list]
-                        temp_ax.scatter(x_vals, y_vals, color=colors)
-                        for x, y, label in zip(x_vals, y_vals, self.parent.species_category_labels):
+                        temp_ax.scatter(x_vals, y_vals_odd, color=colors)
+                        for x, y, label in zip(x_vals, y_vals_odd, self.parent.species_category_labels):
                             temp_ax.text(x=x + 0.1, y=y, s=label, verticalalignment='center', fontstyle='italic')
                     # Reef
                     elif i==1:
                         colors = [self.parent.old_color_dict[r] for r in self.parent.reefs]
-                        temp_ax.scatter(x_vals[:6], y_vals[:6], color=colors)
-                        for x, y, label in zip(x_vals, y_vals, self.parent.reefs):
+                        temp_ax.scatter(x_vals[:6], y_vals_even[1:7], color=colors)
+                        for x, y, label in zip(x_vals, y_vals_even[1:7], self.parent.reefs):
                             temp_ax.text(x=x + 0.1, y=y, s=label, verticalalignment='center', fontstyle='italic')
                     # Reef type
                     elif i==2:
                         colors = [self.parent.old_color_dict[r] for r in self.parent.reef_types]
-                        temp_ax.scatter(x_vals[:3], y_vals[:3], color=colors)
-                        for x, y, label in zip(x_vals, y_vals, self.parent.reef_types):
+                        temp_ax.scatter(x_vals[:3], y_vals_odd[2:5], color=colors)
+                        for x, y, label in zip(x_vals, y_vals_odd[2:5], self.parent.reef_types):
                             temp_ax.text(x=x + 0.1, y=y, s=label, verticalalignment='center', fontstyle='italic')
                     # Depth
                     elif i==3:
                         colors = [self.parent.old_color_dict[r] for r in self.parent.depths]
-                        temp_ax.scatter(x_vals[:3], y_vals[:3], color=colors)
-                        for x, y, label in zip(x_vals, y_vals, self.parent.depths):
+                        temp_ax.scatter(x_vals[:3], y_vals_odd[2:5], color=colors)
+                        for x, y, label in zip(x_vals, y_vals_odd[2:5], self.parent.depths):
                             temp_ax.text(x=x + 0.1, y=y, s=f'{label}m', verticalalignment='center', fontstyle='italic')
                     # Season
                     elif i==4:
                         colors = [self.parent.old_color_dict[r] for r in self.parent.seasons]
-                        temp_ax.scatter(x_vals[:2], y_vals[:2], color=colors)
-                        for x, y, label in zip(x_vals, y_vals, self.parent.seasons):
+                        temp_ax.scatter(x_vals[:2], y_vals_even[3:5], color=colors)
+                        for x, y, label in zip(x_vals, y_vals_even[3:5], self.parent.seasons):
                             temp_ax.text(x=x + 0.1, y=y, s=label, verticalalignment='center', fontstyle='italic')
 
 
@@ -643,10 +645,10 @@ class RestrepoAnalysis:
                         meta_value = self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]
                         color_list.append(self.parent.old_color_dict[meta_value])
 
-                    self.ax_arr[3][i].scatter(x=self.parent.clade_prop_pcoa_coords['PC1'][:-1],
+                    self.ax_arr[i][3].scatter(x=self.parent.clade_prop_pcoa_coords['PC1'][:-1],
                                               y=self.parent.clade_prop_pcoa_coords['PC2'][:-1], marker='.',
                                               c=color_list, s=16)
-                    self._write_var_explained(i, self.ax_arr[3][i], pc_one_var, pc_two_var)
+                    self._write_var_explained(i, self.ax_arr[i][3], pc_one_var, pc_two_var)
 
             def _plot_per_clade_ordinations(self):
                 for j in range(len(self.parent.clades)):  # for each clade
@@ -670,9 +672,9 @@ class RestrepoAnalysis:
                             color_list.append(self.parent.old_color_dict[self.parent.metadata_info_df.loc[
                                 smp_uid, self.meta_info_categories[i]]])
 
-                        self.ax_arr[j][i].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'],
+                        self.ax_arr[i][j].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'],
                                                   marker='.', c=color_list, s=16)
-                        self._write_var_explained(i, self.ax_arr[j][i], pc_one_var, pc_two_var)
+                        self._write_var_explained(i, self.ax_arr[i][j], pc_one_var, pc_two_var)
 
             def _write_var_explained(self, i, ax, pc_one_var, pc_two_var):
                 if i == 0:
@@ -680,7 +682,7 @@ class RestrepoAnalysis:
                     y0, y1 = ax.get_ylim()
                     height = y1-y0
                     width = x1-x0
-                    text_x = x0 + 0.70 * width
+                    text_x = x0 + 0.48 * width
                     text_y = y0 - 0.1 * height
                     ax.text(x=text_x, y=text_y, s=f'({pc_one_var:.2f}, {pc_two_var:.2f})', fontsize='x-small')
         pbc = PCOAByClade(parent=self)
