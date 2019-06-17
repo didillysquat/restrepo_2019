@@ -154,7 +154,11 @@ class RestrepoAnalysis:
             self.metadata_info_df = None
 
         # clade proportion dfs (must be made after meta_data)
+        # this df actually has the proportions normalised to 100 000 sequences
         self.clade_proportion_df = pd.DataFrame(columns=list('ACD'),
+                                                index=self.seq_df.index.values.tolist())
+        # this one is the actual proportions (i.e. 0.03, 0.97, 0.00)
+        self.clade_proportion_df_non_normalised = pd.DataFrame(columns=list('ACD'),
                                                 index=self.seq_df.index.values.tolist())
         self.clade_prop_pcoa_coords = None
         self._create_clade_prop_distances()
@@ -257,16 +261,23 @@ class RestrepoAnalysis:
                     clade_prop_dict['C'] += sample_series[seq_name]
                 elif 'D' in seq_name:
                     clade_prop_dict['D'] += sample_series[seq_name]
+            self.clade_proportion_df_non_normalised.at[sample_uid, 'A'] = clade_prop_dict['A']
+            self.clade_proportion_df_non_normalised.at[sample_uid, 'C'] = clade_prop_dict['C']
+            self.clade_proportion_df_non_normalised.at[sample_uid, 'D'] = clade_prop_dict['D']
             # here we have the totals of the seqs for a given sample separated by clades
             self.clade_proportion_df.at[sample_uid, 'A'] = int(clade_prop_dict['A'] * 100000)
             self.clade_proportion_df.at[sample_uid, 'C'] = int(clade_prop_dict['C'] * 100000)
             self.clade_proportion_df.at[sample_uid, 'D'] = int(clade_prop_dict['D'] * 100000)
         pickle.dump(self.clade_proportion_df,
                     open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'wb'))
+        pickle.dump(self.clade_proportion_df_non_normalised,
+                    open(os.path.join(self.cache_dir, 'clade_proportion_df_non_norm.p'), 'wb'))
 
     def _set_clade_proportion_df_from_cache(self):
         self.clade_proportion_df = pickle.load(
             open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'rb'))
+        self.clade_proportion_df_non_normalised = pickle.load(
+            open(os.path.join(self.cache_dir, 'clade_proportion_df_non_norm.p'), 'rb'))
 
     def _populate_seq_abund_df(self):
         with open(self.seq_rel_abund_ouput_path, 'r') as f:
@@ -687,6 +698,95 @@ class RestrepoAnalysis:
                     ax.text(x=text_x, y=text_y, s=f'({pc_one_var:.2f}, {pc_two_var:.2f})', fontsize='x-small')
         pbc = PCOAByClade(parent=self)
         pbc.plot_PCOA()
+
+    def plot_ternary_clade_proportions(self):
+        class TernaryPlot:
+            def __init__(self, parent):
+                import ternary
+                self.parent = parent
+                self.fig = plt.figure(figsize=(10, 5))
+                # one row for each clade, for the between sample ordinations
+                # one row for the clade proportion ordination
+                # one row for the legends
+                # one column per meta info category i.e. species, reef, reef_type, etc.
+                self.gs = gridspec.GridSpec(1, 2)
+                point_ax = plt.subplot(self.gs[0,0])
+                heatmap_ax = plt.subplot(self.gs[0,1])
+
+                self.fig, self.tax_point = ternary.figure(ax=point_ax, scale=1)
+                self._setup_tax_point()
+                self.fig, self.tax_contour = ternary.figure(ax=heatmap_ax, scale=20)
+                self._setup_tax_contour()
+                apples = 'asdf'
+
+            def _setup_tax_contour(self):
+                self.tax_contour.boundary(linewidth=1)
+                self.tax_contour.left_corner_label("Symbiodinium", fontsize='small', fontstyle='italic')
+                self.tax_contour.right_corner_label("Durisdinium", fontsize='small', fontstyle='italic')
+                self.tax_contour.top_corner_label("Cladocopium", fontsize='small', fontstyle='italic')
+                self.tax_contour.ticks(axis='lbr', linewidth=1, multiple=1, offset=0.025)
+                self.tax_contour.get_axes().axis('off')
+                self.tax_contour.clear_matplotlib_ticks()
+
+            def _setup_tax_point(self):
+                self.tax_point.boundary(linewidth=1)
+                self.tax_point.gridlines(color='black', multiple=0.1)
+                self.tax_point.gridlines(color='blue', multiple=0.025, linewidth=0.5)
+                fontsize = 20
+                # self.tax.set_title("Genera proportion", fontsize=fontsize)
+                self.tax_point.left_corner_label("Symbiodinium", fontsize='small', fontstyle='italic')
+                self.tax_point.right_corner_label("Durisdinium", fontsize='small', fontstyle='italic')
+                self.tax_point.top_corner_label("Cladocopium", fontsize='small', fontstyle='italic')
+                self.tax_point.ticks(axis='lbr', linewidth=1, multiple=0.1, offset=0.025, tick_formats="%.2f")
+                self.tax_point.get_axes().axis('off')
+                self.tax_point.clear_matplotlib_ticks()
+
+            def _plot_ternary_points(self):
+                for sample_uid in self.parent.clade_proportion_df.index.values.tolist():
+                    vals = self.parent.clade_proportion_df.loc[sample_uid].values.tolist()
+                    tot = sum(vals)
+                    if tot != 0:
+                        prop_tup = tuple([val/tot for val in vals])
+                        self.tax_point.scatter([prop_tup], marker='o', color='black', s=20)
+
+            def _plot_ternary_heatmap(self):
+                from ternary.helpers import simplex_iterator
+                d = dict()
+                scale = 10
+                for (i,j,k) in simplex_iterator(scale):
+                    """ Consider i, j, k equivalent to proportion of A, C, and D
+                    so that if i=0, j=5, k=5, this is equivalent to i=0, j=0.5, k=0.5"""
+
+                    step = 1/scale
+                    prop_a = i/scale
+                    prop_c = j/scale
+                    prop_d = k/scale
+                    # we can narrow down the number of samples that meet the prerquisites
+                    upper = prop_a + step
+                    foo = len(self.parent.clade_proportion_df_non_normalised[(self.parent.clade_proportion_df_non_normalised['A']<=prop_a + step) & (self.parent.clade_proportion_df_non_normalised['A']>prop_a) &
+                                                                         (self.parent.clade_proportion_df_non_normalised['C']<=prop_c + step) & (self.parent.clade_proportion_df_non_normalised['C']>prop_c) &
+                                                                         (self.parent.clade_proportion_df_non_normalised['D']<=prop_d + step) & (self.parent.clade_proportion_df_non_normalised['C']>prop_d)].index.values.tolist())
+                    # foo = len(self.parent.clade_proportion_df_non_normalised[])
+
+                    d[(i,j,k)] = foo
+
+                data = {}
+                for i in np.linspace(0,1,11):
+                    for j in np.linspace(0,1,11):
+                        for k in np.linspace(0,1,11):
+                            data[(i, j, k)] = sum([1*i, 0.5*j, 0.1*k])
+                self.tax_contour.heatmap(data, cmap=None)
+                apples = 'asdf'
+
+            def get_val(self, p):
+                print(p)
+                return sum([1*p[0], .5*p[1], 0.1*p[2]])
+
+
+
+        tp = TernaryPlot(parent=self)
+        tp._plot_ternary_heatmap()
+
     def make_dendrogram_with_meta_all_clades_sample_dists(self):
         """ We will produce a similar figure to the one that we have already produced for the types."""
         raise NotImplementedError
@@ -1866,7 +1966,8 @@ if __name__ == "__main__":
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
         ignore_cache=True, cutoff_abund=0.06)
     # rest_analysis.make_dendrogram_with_meta_all_clades()
-    rest_analysis.plot_pcoa_of_cladal()
+    # rest_analysis.plot_pcoa_of_cladal()
+    rest_analysis.plot_ternary_clade_proportions()
     # rest_analysis.permute_sample_permanova()
 
     # rest_analysis.make_sample_balance_figure()
