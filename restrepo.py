@@ -48,6 +48,7 @@ import hierarchy_sp
 import pickle
 import matplotlib.gridspec as gridspec
 from matplotlib import collections, patches
+from matplotlib.patches import Polygon
 from collections import defaultdict, Counter
 import skbio.diversity.alpha
 import skbio.stats.distance
@@ -67,7 +68,7 @@ class RestrepoAnalysis:
                  clade_A_profile_dist_path, clade_C_profile_dist_path, clade_D_profile_dist_path,
                  clade_A_smpl_dist_path, clade_C_smpl_dist_path, clade_D_smpl_dist_path,
                  clade_A__profile_dist_cct_specific_path=None, clade_C_profile_dist_cct_specific_path=None,
-                 clade_D__profile_dist_cct_specific_path=None, ignore_cache=False, meta_data_input_path=None, cutoff_abund=None):
+                 clade_D__profile_dist_cct_specific_path=None, ignore_cache=False, meta_data_input_path=None, cutoff_abund=None, gis_path=None):
         # Although we see clade F in the dataset this is minimal and so we will
         # tackle this sepeately to the analysis of the A, C and D.
         self.cwd = os.path.dirname(os.path.realpath(__file__))
@@ -75,6 +76,7 @@ class RestrepoAnalysis:
         self.clade_genera_labels = ['Symbiodinium', 'Cladocopium', 'Durisdinium']
         self.base_input_dir = base_input_dir
         self.ignore_cache=ignore_cache
+        self.gis_input_base_path = gis_path
         # Paths to raw info files
         self.profile_rel_abund_ouput_path = os.path.join(self.base_input_dir, profile_rel_abund_ouput_path)
         self.profile_abs_abund_ouput_path = os.path.join(self.base_input_dir, profile_abs_abund_ouput_path)
@@ -704,88 +706,38 @@ class RestrepoAnalysis:
             def __init__(self, parent):
                 import ternary
                 self.parent = parent
-                self.fig = plt.figure(figsize=(10, 5))
-                # one row for each clade, for the between sample ordinations
-                # one row for the clade proportion ordination
-                # one row for the legends
-                # one column per meta info category i.e. species, reef, reef_type, etc.
-                self.gs = gridspec.GridSpec(1, 2)
-                point_ax = plt.subplot(self.gs[0,0])
-                heatmap_ax = plt.subplot(self.gs[0,1])
+                self.fig = plt.figure(figsize=(5, 5))
 
+                self.gs = gridspec.GridSpec(1, 1)
+                point_ax = plt.subplot(self.gs[0,0])
                 self.fig, self.tax_point = ternary.figure(ax=point_ax, scale=1)
                 self._setup_tax_point()
-                self.fig, self.tax_contour = ternary.figure(ax=heatmap_ax, scale=20)
-                self._setup_tax_contour()
                 apples = 'asdf'
-
-            def _setup_tax_contour(self):
-                self.tax_contour.boundary(linewidth=1)
-                self.tax_contour.left_corner_label("Symbiodinium", fontsize='small', fontstyle='italic')
-                self.tax_contour.right_corner_label("Durisdinium", fontsize='small', fontstyle='italic')
-                self.tax_contour.top_corner_label("Cladocopium", fontsize='small', fontstyle='italic')
-                self.tax_contour.ticks(axis='lbr', linewidth=1, multiple=1, offset=0.025)
-                self.tax_contour.get_axes().axis('off')
-                self.tax_contour.clear_matplotlib_ticks()
 
             def _setup_tax_point(self):
                 self.tax_point.boundary(linewidth=1)
                 self.tax_point.gridlines(color='black', multiple=0.1)
-                self.tax_point.gridlines(color='blue', multiple=0.025, linewidth=0.5)
+                # self.tax_point.gridlines(color='blue', multiple=0.025, linewidth=0.5)
                 fontsize = 20
                 # self.tax.set_title("Genera proportion", fontsize=fontsize)
                 self.tax_point.left_corner_label("Symbiodinium", fontsize='small', fontstyle='italic')
                 self.tax_point.right_corner_label("Durisdinium", fontsize='small', fontstyle='italic')
                 self.tax_point.top_corner_label("Cladocopium", fontsize='small', fontstyle='italic')
-                self.tax_point.ticks(axis='lbr', linewidth=1, multiple=0.1, offset=0.025, tick_formats="%.2f")
+                # self.tax_point.ticks(axis='lbr', linewidth=1, multiple=0.1, offset=0.025, tick_formats="%.2f")
                 self.tax_point.get_axes().axis('off')
                 self.tax_point.clear_matplotlib_ticks()
 
             def _plot_ternary_points(self):
                 for sample_uid in self.parent.clade_proportion_df.index.values.tolist():
-                    vals = self.parent.clade_proportion_df.loc[sample_uid].values.tolist()
+                    vals = [self.parent.clade_proportion_df.at[sample_uid, 'D'], self.parent.clade_proportion_df.at[sample_uid, 'C'], self.parent.clade_proportion_df.at[sample_uid, 'A']]
                     tot = sum(vals)
                     if tot != 0:
                         prop_tup = tuple([val/tot for val in vals])
-                        self.tax_point.scatter([prop_tup], marker='o', color='black', s=20)
-
-            def _plot_ternary_heatmap(self):
-                from ternary.helpers import simplex_iterator
-                d = dict()
-                scale = 10
-                for (i,j,k) in simplex_iterator(scale):
-                    """ Consider i, j, k equivalent to proportion of A, C, and D
-                    so that if i=0, j=5, k=5, this is equivalent to i=0, j=0.5, k=0.5"""
-
-                    step = 1/scale
-                    prop_a = i/scale
-                    prop_c = j/scale
-                    prop_d = k/scale
-                    # we can narrow down the number of samples that meet the prerquisites
-                    upper = prop_a + step
-                    foo = len(self.parent.clade_proportion_df_non_normalised[(self.parent.clade_proportion_df_non_normalised['A']<=prop_a + step) & (self.parent.clade_proportion_df_non_normalised['A']>prop_a) &
-                                                                         (self.parent.clade_proportion_df_non_normalised['C']<=prop_c + step) & (self.parent.clade_proportion_df_non_normalised['C']>prop_c) &
-                                                                         (self.parent.clade_proportion_df_non_normalised['D']<=prop_d + step) & (self.parent.clade_proportion_df_non_normalised['C']>prop_d)].index.values.tolist())
-                    # foo = len(self.parent.clade_proportion_df_non_normalised[])
-
-                    d[(i,j,k)] = foo
-
-                data = {}
-                for i in np.linspace(0,1,11):
-                    for j in np.linspace(0,1,11):
-                        for k in np.linspace(0,1,11):
-                            data[(i, j, k)] = sum([1*i, 0.5*j, 0.1*k])
-                self.tax_contour.heatmap(data, cmap=None)
-                apples = 'asdf'
-
-            def get_val(self, p):
-                print(p)
-                return sum([1*p[0], .5*p[1], 0.1*p[2]])
-
-
+                        self.tax_point.scatter([prop_tup], marker='o', color='black', s=20, alpha=0.5)
+                plt.savefig(os.path.join(self.parent.figure_dir, 'ternary_figure.png'), dpi=1200)
 
         tp = TernaryPlot(parent=self)
-        tp._plot_ternary_heatmap()
+        tp._plot_ternary_points()
 
     def make_dendrogram_with_meta_all_clades_sample_dists(self):
         """ We will produce a similar figure to the one that we have already produced for the types."""
@@ -1010,6 +962,26 @@ class RestrepoAnalysis:
                 self._draw_natural_earth_features_big_map(land_10m, ocean_10m)
                 self._put_gridlines_on_large_map_ax()
                 self._annotate_big_map()
+                self._draw_reefs_on_map(self.large_map_ax)
+
+            def _draw_reefs_on_map(self, map_ax):
+                for i in range(1, 33, 1):
+                    kml_path = os.path.join(self.parent.gis_input_base_path, f'reef_{i}.kml')
+                    with open(kml_path, 'r') as f:
+                        file = [line.rstrip().lstrip() for line in f]
+                    for i, line in enumerate(file):
+                        if '<coordinates>' in line:
+                            coords = file[i + 1]
+                            break
+                    coords_tup_list_str = coords.split(' ')
+                    x_y_tups_of_feature = []
+                    for tup in coords_tup_list_str:
+                        x_y_tups_of_feature.append([float(_) for _ in tup.split(',')[:-1]])
+                    x_s = [_[0] for _ in x_y_tups_of_feature]
+                    y_s = [_[1] for _ in x_y_tups_of_feature]
+                    poly_xy = [[x, y] for x, y in zip(x_s, y_s)]
+                    reef_poly = Polygon(poly_xy, closed=True, fill=True, edgecolor='None', color='red', alpha=0.2, zorder=4)
+                    map_ax.add_patch(reef_poly)
 
             def _annotate_small_map(self):
                 recticle_x = (38.7 + 39.3) / 2
@@ -1066,17 +1038,17 @@ class RestrepoAnalysis:
                 self.large_map_ax.plot(x_site_coords[2:4], y_site_coords[2:4], 'ks')
                 self.large_map_ax.plot(x_site_coords[4:6], y_site_coords[4:6], 'k^')
                 # Abu Madafi
-                self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, self.site_labels[0])
+                self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, self.site_labels[0], fontsize='medium')
                 # Shi'b Nazar
-                self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, self.site_labels[1])
+                self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, self.site_labels[1], fontsize='medium')
                 # Al Fahal
-                self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, self.site_labels[2])
+                self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, self.site_labels[2], fontsize='medium')
                 # Qita al-Kirsh
-                self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, self.site_labels[3])
+                self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, self.site_labels[3], fontsize='medium')
                 # Tahla
-                self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, self.site_labels[4])
+                self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, self.site_labels[4], fontsize='medium')
                 # Fsar
-                self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, self.site_labels[5])
+                self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, self.site_labels[5], fontsize='medium')
                 self.large_map_ax.plot(39.14, 22.57, 'k^', zorder=3)
                 self.large_map_ax.text(39.16, 22.57, 'Inshore', verticalalignment='center')
                 self.large_map_ax.plot(39.14, 22.51, 'ks', zorder=3)
@@ -1964,10 +1936,10 @@ if __name__ == "__main__":
         clade_D_smpl_dist_path=os.path.join(
             'between_sample_distance_sqrt_trans', 'D',
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
-        ignore_cache=True, cutoff_abund=0.06)
+        ignore_cache=True, cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis')
     # rest_analysis.make_dendrogram_with_meta_all_clades()
     # rest_analysis.plot_pcoa_of_cladal()
-    rest_analysis.plot_ternary_clade_proportions()
+    rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_sample_permanova()
 
     # rest_analysis.make_sample_balance_figure()
