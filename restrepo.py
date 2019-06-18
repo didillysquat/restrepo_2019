@@ -962,7 +962,7 @@ class RestrepoAnalysis:
                 self._draw_natural_earth_features_big_map(land_10m, ocean_10m)
                 self._put_gridlines_on_large_map_ax()
                 self._annotate_big_map()
-                self._draw_reefs_on_map(self.large_map_ax)
+                # self._draw_reefs_on_map(self.large_map_ax)
 
             def _draw_reefs_on_map(self, map_ax):
                 for i in range(1, 33, 1):
@@ -1122,18 +1122,18 @@ class RestrepoAnalysis:
         https://matplotlib.org/users/transforms_tutorial.html
         """
 
-        fig = plt.figure(figsize=(15, 6))
+        fig = plt.figure(figsize=(15, 7))
         # required for getting the bbox of the text annotations
         fig.canvas.draw()
 
         apples = 'asdf'
         # order: dendro, label, species, depth, reef_type, season
-        list_of_heights = [12,26,7,3,3,2]
+        list_of_heights = [12,26,7,6,3,3,2]
         axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(list_of_heights)
         for i in range(len(self.clades)):
             self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr)
         print('Saving image')
-        plt.savefig('here.png', dpi=1200)
+        plt.savefig(os.path.join(self.figure_dir, 'dendro_figure.png'), dpi=1200)
 
     def _make_dendrogram_with_meta_fig_for_all_clades(self, clade_index, axarr):
         clade = self.clades[clade_index]
@@ -1176,11 +1176,12 @@ class RestrepoAnalysis:
 
         profile_uid_to_sample_uid_list_dict = self._generate_profile_uid_to_sample_uid_list_dict()
 
-        # we will work with a class for doing the mata plotting as it will be quite involved
+        # we will work with a class for doing the meta plotting as it will be quite involved
         mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[clade_index + 1][2:],
                               prof_uid_to_smpl_uid_list_dict=profile_uid_to_sample_uid_list_dict,
                               prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=axarr[clade_index + 1][0], sub_cat_axarr=axarr[clade_index][2:], clade_index=clade_index)
         mip.plot_species_meta()
+        mip.plot_reef_meta()
         mip.plot_depth_meta()
         mip.plot_reef_type()
         mip.plot_season()
@@ -1750,7 +1751,7 @@ class MetaInfoPlotter:
         # these are the axes that will hold the subcategory labels
         self.sub_cat_axarr = sub_cat_axarr
         # set the x axis lims to match the dend_ax
-        for ax, cat_ax, label, labpad in zip(self.meta_axarr, self.sub_cat_axarr, ['Species', 'Depth', 'Reef\nType', 'Season'], [0,10,0,10]):
+        for ax, cat_ax, label, labpad in zip(self.meta_axarr, self.sub_cat_axarr, ['Species', 'Reef' ,'Depth', 'Reef\nType', 'Season'], [0,10,0,10,0]):
             ax.set_xlim(dend_ax.get_xlim())
             # ax.spines['top'].set_visible(False)
             # ax.spines['bottom'].set_visible(False)
@@ -1777,6 +1778,7 @@ class MetaInfoPlotter:
         self.depth_plotter = None
         self.reef_type_plotter = None
         self.season = None
+        self.reef_plotter = None
 
     def plot_species_meta(self):
         # Plot species, season, depth, reef type
@@ -1789,12 +1791,25 @@ class MetaInfoPlotter:
                                                category_list=category_list, category_df_header='species', category_labels=category_labels)
         self.species_plotter.plot()
 
+    def plot_reef_meta(self):
+        # Plot species, season, depth, reef type
+        color_dict = {
+            'Al Fahal': '#98FB98', 'Abu Madafi': '#F0E68C',
+            'Qita al Kirsh': '#DDA0DD', 'Shib Nazar': '#8B008B', 'Tahla': '#00BFFF', 'Fsar': '#0000CD'}
+        category_list = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
+
+
+        category_labels = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
+        self.reef_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[1], cat_ax=self.sub_cat_axarr[1], color_dict=color_dict,
+                                               category_list=category_list, category_df_header='reef', category_labels=category_labels)
+        self.reef_plotter.plot()
+
     def plot_depth_meta(self):
         color_dict = {
             1:'#CAE1FF', 15: '#2E37FE', 30: '#000080'}
         category_list = [30, 15, 1]
         category_labels = ['30 m', '15 m', '1 m']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[1], cat_ax=self.sub_cat_axarr[1],color_dict=color_dict,
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], cat_ax=self.sub_cat_axarr[2],color_dict=color_dict,
                                                category_list=category_list, category_df_header='depth', category_labels=category_labels)
         self.depth_plotter.plot()
 
@@ -1803,7 +1818,7 @@ class MetaInfoPlotter:
             'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000'}
         category_list = ['Offshore', 'Midshelf', 'Inshore']
         category_labels = ['Offshore', 'Midshelf', 'Inshore']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], cat_ax=self.sub_cat_axarr[2],color_dict=color_dict,
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], cat_ax=self.sub_cat_axarr[3],color_dict=color_dict,
                                              category_list=category_list, category_df_header='reef_type', category_labels=category_labels)
         self.depth_plotter.plot()
 
@@ -1812,7 +1827,7 @@ class MetaInfoPlotter:
             'Summer': '#FF0000', 'Winter': '#00BFFF'}
         category_list = ['Summer', 'Winter']
         category_labels = ['Summer', 'Winter']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], cat_ax=self.sub_cat_axarr[3],color_dict=color_dict,
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[4], cat_ax=self.sub_cat_axarr[4],color_dict=color_dict,
                                              category_list=category_list, category_df_header='season', category_labels=category_labels)
         self.depth_plotter.plot()
 
@@ -1937,9 +1952,9 @@ if __name__ == "__main__":
             'between_sample_distance_sqrt_trans', 'D',
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
         ignore_cache=True, cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis')
-    # rest_analysis.make_dendrogram_with_meta_all_clades()
+    rest_analysis.make_dendrogram_with_meta_all_clades()
     # rest_analysis.plot_pcoa_of_cladal()
-    rest_analysis.make_sample_balance_figure()
+    # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_sample_permanova()
 
     # rest_analysis.make_sample_balance_figure()
