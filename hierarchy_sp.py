@@ -460,30 +460,30 @@ def _plot_dendrogram_sp(icoords, dcoords, ivl, p, n, mh, orientation,
     for color in colors_used:
         color_to_lines[color] = []
     for (xline, yline, color) in zip(xlines, ylines, color_list):
-        if yline[0] == 0 and yline[3] == 0:  # then noth verlines are node lines and need a thickness
+        if xline[0] == 0 and xline[3] == 0:  # then both verlines are node lines and need a thickness
             color_to_lines[color].append(
                 LineInfo(
                     coord_list=list(zip(xline[:2], yline[:2])),
-                    thickness=node_to_thickness_dict[tick_to_profile_name_dict[xline[0]]]))
+                    thickness=node_to_thickness_dict[tick_to_profile_name_dict[yline[0]]]))
             color_to_lines[color].append(
                 LineInfo(
                     coord_list=list(zip(xline[2:], yline[2:])),
-                    thickness=node_to_thickness_dict[tick_to_profile_name_dict[xline[3]]]))
+                    thickness=node_to_thickness_dict[tick_to_profile_name_dict[yline[3]]]))
             color_to_lines[color].append(
                 LineInfo(
                     coord_list=list(zip(xline[1:-1], yline[1:-1])),
                     thickness=default_line_thickness))
-        elif yline[0] == 0:
+        elif xline[0] == 0: # then only the bottom line needs a thickness
             color_to_lines[color].append(
                 LineInfo(
                     coord_list=list(zip(xline[:2], yline[:2])),
-                    thickness=node_to_thickness_dict[tick_to_profile_name_dict[xline[0]]]))
+                    thickness=node_to_thickness_dict[tick_to_profile_name_dict[yline[0]]]))
             color_to_lines[color].append(LineInfo(coord_list=list(zip(xline[1:], yline[1:])), thickness=default_line_thickness))
-        elif yline[3] == 0:
+        elif xline[3] == 0: # then only the top line needs a thickness
             color_to_lines[color].append(
                 LineInfo(
                     coord_list=list(zip(xline[2:], yline[2:])),
-                    thickness=node_to_thickness_dict[tick_to_profile_name_dict[xline[3]]]))
+                    thickness=node_to_thickness_dict[tick_to_profile_name_dict[yline[3]]]))
             color_to_lines[color].append(LineInfo(coord_list=list(zip(xline[:-1], yline[:-1])), thickness=default_line_thickness))
         else:
             color_to_lines[color].append(LineInfo(coord_list=list(zip(xline, yline)), thickness=default_line_thickness))

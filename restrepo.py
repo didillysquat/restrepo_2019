@@ -1173,7 +1173,7 @@ class RestrepoAnalysis:
         https://matplotlib.org/users/transforms_tutorial.html
         """
 
-        fig = plt.figure(figsize=(7, 15))
+        fig = plt.figure(figsize=(7, 12))
         # required for getting the bbox of the text annotations
         fig.canvas.draw()
 
@@ -1185,6 +1185,7 @@ class RestrepoAnalysis:
             self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr)
         print('Saving image')
         plt.savefig(os.path.join(self.figure_dir, 'dendro_figure.png'), dpi=1200)
+        plt.savefig(os.path.join(self.figure_dir, 'dendro_figure.svg'), dpi=1200)
 
     def _make_dendrogram_with_meta_fig_for_all_clades(self, clade_index, axarr):
         clade = self.clades[clade_index]
