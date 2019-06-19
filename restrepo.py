@@ -181,6 +181,27 @@ class RestrepoAnalysis:
         self.depths = [1, 15, 30]
         self.seasons = ['Winter', 'Summer']
 
+        self._del_propblem_sample()
+
+    def _del_propblem_sample(self):
+        """ THis is originally done in the meta info df creation but using the cache system sometimes
+        meant that this was being skipped. I have put it in here so that it is never skipped and the sample
+        is always removed."""
+        # delete 'FS15SE8_FS15SE8_N705-S508' from the df
+        for uid, name in self.smp_uid_to_name_dict.items():
+            if name == 'FS15SE8_FS15SE8_N705-S508':
+                self.seq_df.drop(index=uid, inplace=True, errors='ignore')
+                self.profile_df.drop(index=uid, inplace=True, errors='ignore')
+                if self.prof_df_cutoff is not None:
+                    self.prof_df_cutoff.drop(index=uid, inplace=True, errors='ignore')
+                if self.sample_clade_dist_df_dict:
+                    for clade in self.clades:
+                        if uid in self.sample_clade_dist_df_dict[clade].index.values.tolist():
+                            self.sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True, errors='ignore')
+                            self.sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True, errors='ignore')
+
+                break
+
     def _if_clade_proportion_df_cache_exists(self):
         return os.path.exists(os.path.join(self.cache_dir, 'clade_proportion_df.p'))
 
@@ -190,21 +211,28 @@ class RestrepoAnalysis:
     def _create_clade_prop_distances(self):
         """Go through the self.parent.seq_df and get the proportion of A, C and D sequences
         for each sample and populate this into the self.clade_proportion_df."""
-        sample_uids = self.clade_proportion_df.index.values.tolist()
-        if self._if_clade_proportion_df_cache_exists():
-            self._set_clade_proportion_df_from_cache()
+        if os.path.exists(os.path.join(self.cache_dir, 'clade_prop_pcoa_coords.p')):
+            self.clade_prop_pcoa_coords = pickle.load(open(os.path.join(self.cache_dir, 'clade_prop_pcoa_coords.p'), 'rb'))
+            self.clade_proportion_df = pickle.load(
+                open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'rb'))
+            self.clade_proportion_df_non_normalised = pickle.load(
+                open(os.path.join(self.cache_dir, 'clade_proportion_df_non_norm.p'), 'rb'))
         else:
-            self._set_clade_proportion_df_from_scratch(sample_uids)
+            sample_uids = self.clade_proportion_df.index.values.tolist()
+            if self._if_clade_proportion_df_cache_exists():
+                self._set_clade_proportion_df_from_cache()
+            else:
+                self._set_clade_proportion_df_from_scratch(sample_uids)
 
-        # populate a dictionary that will hold the distances between each of the samples
-        if self._if_clade_proportion_distance_dict_chache_exists():
-            clade_prop_distance_dict = self._set_clade_proportion_distance_dict_from_chache()
-        else:
-            clade_prop_distance_dict = self._set_clade_make_clade_proportion_distance_dict_from_scratch(sample_uids)
+            # populate a dictionary that will hold the distances between each of the samples
+            if self._if_clade_proportion_distance_dict_chache_exists():
+                clade_prop_distance_dict = self._set_clade_proportion_distance_dict_from_chache()
+            else:
+                clade_prop_distance_dict = self._set_clade_make_clade_proportion_distance_dict_from_scratch(sample_uids)
 
-        dist_file_as_list = self._make_clade_prop_distance_matrix_2dlist(clade_prop_distance_dict, sample_uids)
+            dist_file_as_list = self._make_clade_prop_distance_matrix_2dlist(clade_prop_distance_dict, sample_uids)
 
-        self._clade_proportion_pcoa_coords_df(dist_file_as_list, sample_uids)
+            self._clade_proportion_pcoa_coords_df(dist_file_as_list, sample_uids)
 
     def _clade_proportion_pcoa_coords_df(self, dist_file_as_list, sample_uids):
         pcoa_output = pcoa(np.array(dist_file_as_list))
@@ -217,6 +245,7 @@ class RestrepoAnalysis:
         self.clade_prop_pcoa_coords.to_csv(
             os.path.join(self.outputs_dir, 'sample_clade_props_pcoa_coords.csv'),
             index=True, header=True, sep=',')
+        pickle.dump(self.clade_prop_pcoa_coords, open(os.path.join(self.cache_dir, 'clade_prop_pcoa_coords.p'), 'wb'))
 
     def _make_clade_prop_distance_matrix_2dlist(self, clade_prop_distance_dict, sample_uids):
         dist_file_as_list = []
@@ -282,22 +311,25 @@ class RestrepoAnalysis:
             open(os.path.join(self.cache_dir, 'clade_proportion_df_non_norm.p'), 'rb'))
 
     def _populate_seq_abund_df(self):
-        with open(self.seq_rel_abund_ouput_path, 'r') as f:
-            seq_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
+        if os.path.exists(os.path.join(self.cache_dir, 'seq_df.p')):
+            return pickle.load(open(os.path.join(self.cache_dir, 'seq_df.p'), 'rb'))
+        else:
+            with open(self.seq_rel_abund_ouput_path, 'r') as f:
+                seq_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
 
-        df = pd.DataFrame(seq_data)
-        df.iat[0,0] = 'sample_uid'
-        df.columns = df.iloc[0]
-        df.drop(index=0, inplace=True)
-        df.drop(columns='sample_name', inplace=True)
-        df.set_index('sample_uid', drop=True, inplace=True)
-        # Get rid of all of the superflous columns only leaving the seq rel counts
-        df = df.iloc[:, 20:]
-        df = df[:-5]
-        df.index = df.index.astype('int')
-
-
-        return df.astype('float')
+            df = pd.DataFrame(seq_data)
+            df.iat[0,0] = 'sample_uid'
+            df.columns = df.iloc[0]
+            df.drop(index=0, inplace=True)
+            df.drop(columns='sample_name', inplace=True)
+            df.set_index('sample_uid', drop=True, inplace=True)
+            # Get rid of all of the superflous columns only leaving the seq rel counts
+            df = df.iloc[:, 20:]
+            df = df[:-5]
+            df.index = df.index.astype('int')
+            df = df.astype('float')
+            pickle.dump(df, open(os.path.join(self.cache_dir, 'seq_df.p'), 'wb'))
+            return df
 
     def _init_metadata_info_df(self, meta_info_path):
         """The matching of names between the SP output and the meta info that Alejandro was working from was causing us
@@ -343,56 +375,59 @@ class RestrepoAnalysis:
 
         We should therefore probably delete this sample from the profiles and smpls df.
         """
-        meta_info_df = pd.DataFrame.from_csv(meta_info_path)
-        # The same names in the meta info are different from those in the SymPortal output.
-        # parse through the meta info names and make sure that they are found in only one of the SP output names
-        # then, we can simply modify the sample uid to name dictionary (or better make a new one)
-        new_name_to_old_name_dict = {}
-        old_to_search = list(self.smp_uid_to_name_dict.values())
-        len_new = len(meta_info_df.index.values.tolist())
-        len_old = len(old_to_search)
-        for new_name in meta_info_df.index.values.tolist():
-            if new_name in ['Q15G6', 'Q15G7', 'SN15G10', 'SN15G6', 'SN15G7', 'SN15G8', 'SN15G9', 'FS15SE8', 'SN15G2', 'T1PC4']:
-                self._add_new_name_to_old_name_entry_manually(new_name, new_name_to_old_name_dict, old_to_search)
-            else:
-                count = 0
-                for old_name in old_to_search:
-                    if new_name in old_name:
-                        old_name_match = old_name
-                        count += 1
-                if count != 1:
-                    print(f'New name {new_name} not found in SP output {count}')
+        if os.path.exists(os.path.join(self.cache_dir, 'meta_info_df.p')):
+            return pickle.load(open(os.path.join(self.cache_dir, 'meta_info_df.p'), 'rb'))
+        else:
+            meta_info_df = pd.DataFrame.from_csv(meta_info_path)
+            # The same names in the meta info are different from those in the SymPortal output.
+            # parse through the meta info names and make sure that they are found in only one of the SP output names
+            # then, we can simply modify the sample uid to name dictionary (or better make a new one)
+            new_name_to_old_name_dict = {}
+            old_to_search = list(self.smp_uid_to_name_dict.values())
+            len_new = len(meta_info_df.index.values.tolist())
+            len_old = len(old_to_search)
+            for new_name in meta_info_df.index.values.tolist():
+                if new_name in ['Q15G6', 'Q15G7', 'SN15G10', 'SN15G6', 'SN15G7', 'SN15G8', 'SN15G9', 'FS15SE8', 'SN15G2', 'T1PC4']:
+                    self._add_new_name_to_old_name_entry_manually(new_name, new_name_to_old_name_dict, old_to_search)
                 else:
-                    new_name_to_old_name_dict[new_name] = old_name_match
-                    old_to_search.remove(old_name_match)
+                    count = 0
+                    for old_name in old_to_search:
+                        if new_name in old_name:
+                            old_name_match = old_name
+                            count += 1
+                    if count != 1:
+                        print(f'New name {new_name} not found in SP output {count}')
+                    else:
+                        new_name_to_old_name_dict[new_name] = old_name_match
+                        old_to_search.remove(old_name_match)
 
-        # delete 'FS15SE8_FS15SE8_N705-S508' from the df
-        for uid, name in self.smp_uid_to_name_dict.items():
-            if name == 'FS15SE8_FS15SE8_N705-S508':
-                self.seq_df.drop(index=uid, inplace=True)
-                self.profile_df.drop(index=uid, inplace=True)
-                if self.prof_df_cutoff is not None:
-                    self.prof_df_cutoff.drop(index=uid, inplace=True)
-                if self.sample_clade_dist_df_dict:
-                    for clade in self.clades:
-                        if uid in self.sample_clade_dist_df_dict[clade].index.values.tolist():
-                            self.sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True)
-                            self.sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True)
+            # delete 'FS15SE8_FS15SE8_N705-S508' from the df
+            for uid, name in self.smp_uid_to_name_dict.items():
+                if name == 'FS15SE8_FS15SE8_N705-S508':
+                    self.seq_df.drop(index=uid, inplace=True)
+                    self.profile_df.drop(index=uid, inplace=True)
+                    if self.prof_df_cutoff is not None:
+                        self.prof_df_cutoff.drop(index=uid, inplace=True)
+                    if self.sample_clade_dist_df_dict:
+                        for clade in self.clades:
+                            if uid in self.sample_clade_dist_df_dict[clade].index.values.tolist():
+                                self.sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True)
+                                self.sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True)
 
-                break
+                    break
 
-        # now that we have a conversion from new_name to old name, we can use this to look up the uid of the
-        # mata info sample names in relation to the SP outputs. And use these uids as index rather than the meta info
-        # names
-        new_uid_index = []
-        for new_name in meta_info_df.index.values.tolist():
-            new_uid_index.append(int(self.smp_name_to_uid_dict[new_name_to_old_name_dict[new_name]]))
+            # now that we have a conversion from new_name to old name, we can use this to look up the uid of the
+            # mata info sample names in relation to the SP outputs. And use these uids as index rather than the meta info
+            # names
+            new_uid_index = []
+            for new_name in meta_info_df.index.values.tolist():
+                new_uid_index.append(int(self.smp_name_to_uid_dict[new_name_to_old_name_dict[new_name]]))
 
-        meta_info_df.index = new_uid_index
-        meta_info_df.columns = ['reef', 'reef_type', 'depth', 'species', 'season']
-        meta_info_df = meta_info_df[['species', 'reef', 'reef_type', 'depth', 'season']]
-
-        return meta_info_df
+            meta_info_df.index = new_uid_index
+            meta_info_df.columns = ['reef', 'reef_type', 'depth', 'species', 'season']
+            meta_info_df = meta_info_df[['species', 'reef', 'reef_type', 'depth', 'season']]
+            pickle.dump(meta_info_df, open(os.path.join(self.cache_dir, 'meta_info_df.p'), 'wb'))
+            return meta_info_df
 
 
     def _add_new_name_to_old_name_entry_manually(self, new_name, new_name_to_old_name_dict, old_to_search):
@@ -490,51 +525,67 @@ class RestrepoAnalysis:
             pickle.dump(obj=self.profile_clade_dist_df_dict, file=open(self.profile_clade_dist_dict_p_path, 'wb'))
 
     def _populate_profile_df(self):
-        # read in df
-        df = pd.read_csv(filepath_or_buffer=self.profile_rel_abund_ouput_path, sep='\t', header=None)
-        # collect sample uid to name info
-        index_list = df.index.values.tolist()
-        for i in range(len(index_list)):
-            if 'Sequence accession' in str(df.iloc[i, 0]):
-                # then this is the first row to get rid of
-                index_to_cut_from = i
-                break
-        self.smp_uid_to_name_dict = {int(uid): name for uid, name in zip(df[0][7:index_to_cut_from], df[1][7:index_to_cut_from])}
-        self.smp_name_to_uid_dict = {name: uid for uid, name in self.smp_uid_to_name_dict.items()}
-        # del smp name column
-        df.drop(columns=1, inplace=True)
-        # reset df col headers
-        df.columns = range(len(list(df)))
-        # Populate prof abund dicts
-        self.prof_uid_to_local_abund_dict = {int(uid): int(abund) for uid, abund in zip(df.iloc[0,1:], df.iloc[4,1:])}
-        self.prof_uid_to_global_abund_dict = {int(uid): int(abund) for uid, abund in zip(df.iloc[0,1:], df.iloc[5,1:])}
-        self.prof_uid_to_name_dict = {int(uid): name for uid, name in zip(df.iloc[0,1:], df.iloc[6,1:])}
-        self.prof_name_to_uid_dict = {name: uid for uid, name in self.prof_uid_to_name_dict.items()}
-        # drop meta info except for prof uid
-        # top
-        df.drop(index=range(1,7), inplace=True)
+        if os.path.exists(os.path.join(self.cache_dir, 'profile_df.p')):
+            self.profile_df = pickle.load(open(os.path.join(self.cache_dir, 'profile_df.p'), 'rb'))
+            self.smp_uid_to_name_dict = pickle.load(open(os.path.join(self.cache_dir, 'smp_uid_to_name_dict.p'), 'rb'))
+            self.smp_name_to_uid_dict = pickle.load(open(os.path.join(self.cache_dir, 'smp_name_to_uid_dict.p'), 'rb'))
+            self.prof_uid_to_local_abund_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict.p'), 'rb'))
+            self.prof_uid_to_global_abund_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_global_abund_dict.p'), 'rb'))
+            self.prof_uid_to_name_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_name_dict.p'), 'rb'))
+            self.prof_name_to_uid_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_name_to_uid_dict.p'), 'rb'))
+        else:
+            # read in df
+            df = pd.read_csv(filepath_or_buffer=self.profile_rel_abund_ouput_path, sep='\t', header=None)
+            # collect sample uid to name info
+            index_list = df.index.values.tolist()
+            for i in range(len(index_list)):
+                if 'Sequence accession' in str(df.iloc[i, 0]):
+                    # then this is the first row to get rid of
+                    index_to_cut_from = i
+                    break
+            self.smp_uid_to_name_dict = {int(uid): name for uid, name in zip(df[0][7:index_to_cut_from], df[1][7:index_to_cut_from])}
+            self.smp_name_to_uid_dict = {name: uid for uid, name in self.smp_uid_to_name_dict.items()}
+            # del smp name column
+            df.drop(columns=1, inplace=True)
+            # reset df col headers
+            df.columns = range(len(list(df)))
+            # Populate prof abund dicts
+            self.prof_uid_to_local_abund_dict = {int(uid): int(abund) for uid, abund in zip(df.iloc[0,1:], df.iloc[4,1:])}
+            self.prof_uid_to_global_abund_dict = {int(uid): int(abund) for uid, abund in zip(df.iloc[0,1:], df.iloc[5,1:])}
+            self.prof_uid_to_name_dict = {int(uid): name for uid, name in zip(df.iloc[0,1:], df.iloc[6,1:])}
+            self.prof_name_to_uid_dict = {name: uid for uid, name in self.prof_uid_to_name_dict.items()}
+            # drop meta info except for prof uid
+            # top
+            df.drop(index=range(1,7), inplace=True)
 
-        # bottom
-        # get the index to crop from
+            # bottom
+            # get the index to crop from
 
-        index_list = df.index.values.tolist()
-        for i in range(len(index_list)):
-            if 'Sequence accession' in str(df.iloc[i,0]):
-                # then this is the first row to get rid of
-                index_to_cut_from = i
-                break
+            index_list = df.index.values.tolist()
+            for i in range(len(index_list)):
+                if 'Sequence accession' in str(df.iloc[i,0]):
+                    # then this is the first row to get rid of
+                    index_to_cut_from = i
+                    break
 
-        df = df.iloc[:index_to_cut_from,]
-        # get prof uids to make into the column headers
-        headers = [int(a) for a in df.iloc[0,1:].values.tolist()]
-        # drop the prof uids
-        df.drop(index=0, inplace=True)
-        # promote smp uids to index
-        df.set_index(keys=0, drop=True, inplace=True)
-        df.columns = headers
-        df = df.astype(dtype='float')
-        df.index = df.index.astype('int')
-        self.profile_df = df
+            df = df.iloc[:index_to_cut_from,]
+            # get prof uids to make into the column headers
+            headers = [int(a) for a in df.iloc[0,1:].values.tolist()]
+            # drop the prof uids
+            df.drop(index=0, inplace=True)
+            # promote smp uids to index
+            df.set_index(keys=0, drop=True, inplace=True)
+            df.columns = headers
+            df = df.astype(dtype='float')
+            df.index = df.index.astype('int')
+            self.profile_df = df
+            pickle.dump(self.profile_df, open(os.path.join(self.cache_dir, 'profile_df.p'), 'wb'))
+            pickle.dump(self.smp_uid_to_name_dict, open(os.path.join(self.cache_dir, 'smp_uid_to_name_dict.p'), 'wb'))
+            pickle.dump(self.smp_name_to_uid_dict, open(os.path.join(self.cache_dir, 'smp_name_to_uid_dict.p'), 'wb'))
+            pickle.dump(self.prof_uid_to_local_abund_dict, open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict.p'), 'wb'))
+            pickle.dump(self.prof_uid_to_global_abund_dict, open(os.path.join(self.cache_dir, 'prof_uid_to_global_abund_dict.p'), 'wb'))
+            pickle.dump(self.prof_uid_to_name_dict, open(os.path.join(self.cache_dir, 'prof_uid_to_name_dict.p'), 'wb'))
+            pickle.dump(self.prof_name_to_uid_dict, open(os.path.join(self.cache_dir, 'prof_name_to_uid_dict.p'), 'wb'))
 
     def plot_pcoa_of_cladal(self):
         class PCOAByClade:
@@ -1122,14 +1173,14 @@ class RestrepoAnalysis:
         https://matplotlib.org/users/transforms_tutorial.html
         """
 
-        fig = plt.figure(figsize=(15, 7))
+        fig = plt.figure(figsize=(7, 15))
         # required for getting the bbox of the text annotations
         fig.canvas.draw()
 
         apples = 'asdf'
         # order: dendro, label, species, depth, reef_type, season
-        list_of_heights = [12,26,7,6,3,3,2]
-        axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(list_of_heights)
+        widths = [12,26,7,6,3,3,2]
+        axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(widths)
         for i in range(len(self.clades)):
             self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr)
         print('Saving image')
@@ -1147,21 +1198,21 @@ class RestrepoAnalysis:
             axarr[clade_index + 1][0].set_yticks([])
 
         title_list = ['Symbiodinium', 'Cladocopium', 'Durisdinium']
-        axarr[clade_index + 1][0].set_title(label=title_list[clade_index], fontweight='bold', loc='center', fontstyle='italic', fontsize='small')
+        axarr[clade_index + 1][0].set_ylabel(ylabel=title_list[clade_index], fontweight='bold', fontstyle='italic', fontsize='small')
         self._remove_spines_from_dendro(axarr[clade_index + 1], clade_index=clade_index)
 
         # get the uids in order for the profiles in the dendrogram
         ordered_prof_uid_list = []
-        prof_uid_to_x_loc_dict = {}
-        for x_loc, lab_str in dendro_info['tick_to_profile_name_dict'].items():
+        prof_uid_to_y_loc_dict = {}
+        for y_loc, lab_str in dendro_info['tick_to_profile_name_dict'].items():
             temp_uid = self.prof_name_to_uid_dict[lab_str.split(' ')[0]]
             ordered_prof_uid_list.append(temp_uid)
-            prof_uid_to_x_loc_dict[temp_uid] = x_loc
+            prof_uid_to_y_loc_dict[temp_uid] = y_loc
 
         # Plot labels in second axes
         self._plot_labels_plot_for_dendro_and_meta_fig(axarr[clade_index + 1][0], dendro_info, axarr[clade_index + 1][1])
         if clade_index == 0:
-            axarr[clade_index + 1][1].set_ylabel('ITS2 type profile name', fontsize='x-small', fontweight='bold', labelpad=18)
+            axarr[clade_index + 1][1].set_title('ITS2 type profile name', fontsize='x-small', fontweight='bold')
 
 
         # for each ITS2 type profile we will need to get the samples that the profile was found in
@@ -1179,7 +1230,7 @@ class RestrepoAnalysis:
         # we will work with a class for doing the meta plotting as it will be quite involved
         mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[clade_index + 1][2:],
                               prof_uid_to_smpl_uid_list_dict=profile_uid_to_sample_uid_list_dict,
-                              prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=axarr[clade_index + 1][0], sub_cat_axarr=axarr[clade_index][2:], clade_index=clade_index)
+                              prof_uid_to_y_loc_dict=prof_uid_to_y_loc_dict, dend_ax=axarr[clade_index + 1][0], sub_cat_axarr=axarr[clade_index][2:], clade_index=clade_index)
         mip.plot_species_meta()
         mip.plot_reef_meta()
         mip.plot_depth_meta()
@@ -1280,7 +1331,7 @@ class RestrepoAnalysis:
         # we will work with a class for doing the mata plotting as it will be quite involved
         mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[1][2:],
                               prof_uid_to_smpl_uid_list_dict=profile_uid_to_sample_uid_list_dict,
-                              prof_uid_to_x_loc_dict=prof_uid_to_x_loc_dict, dend_ax=axarr[1][0], sub_cat_axarr=axarr[0][2:])
+                              prof_uid_to_y_loc_dict=prof_uid_to_x_loc_dict, dend_ax=axarr[1][0], sub_cat_axarr=axarr[0][2:])
         mip.plot_species_meta()
         mip.plot_depth_meta()
         mip.plot_reef_type()
@@ -1295,18 +1346,18 @@ class RestrepoAnalysis:
     def _remove_spines_from_dendro(self, axarr, clade_index=None):
         if clade_index is not None:
             if clade_index == 0:
-                axarr[0].set_ylabel('BrayCurtis distance', fontsize='x-small', fontweight='bold')
+                axarr[0].set_title('BrayCurtis distance', fontsize='x-small', fontweight='bold')
         else:
             axarr[0].set_ylabel('BrayCurtis distance', fontsize='x-small', fontweight='bold')
 
         axarr[0].spines['top'].set_visible(False)
-        axarr[0].spines['right'].set_visible(False)
+        axarr[0].spines['bottom'].set_visible(False)
         axarr[0].spines['left'].set_visible(False)
 
     def _plot_labels_plot_for_dendro_and_meta_fig(self, dend_ax, dendro_info, labels_ax):
         # make the x axis limits of the labels plot exactly the same as the dendrogram plot
         # then we can use the dendrogram plot x coordinates to plot the labels in the labels plot.
-        labels_ax.set_xlim(dend_ax.get_xlim())
+        labels_ax.set_ylim(dend_ax.get_ylim())
 
         annotation_list = self._store_and_annotate_labels(dendro_info, labels_ax)
 
@@ -1336,22 +1387,23 @@ class RestrepoAnalysis:
     def _create_connection_lines(self, annotation_list, labels_ax):
         lines = []
         min_gap_to_plot = 0  # the minimum dist required between label and bottom of plot
-        y_val_buffer = 0.02  # the distance to leave between the line and the label
+        x_val_buffer = 0.02  # the distance to leave between the line and the label
         for ann in annotation_list:
             bbox = ann.get_window_extent()
             inv = labels_ax.transData.inverted()
             bbox_data = inv.transform([(bbox.x0, bbox.y0), (bbox.x1, bbox.y1)])
-            line_x = (bbox_data[1][0] + bbox_data[0][0]) / 2
+            # Getting the center line of the label
+            line_y = (bbox_data[1][1] + bbox_data[0][1]) / 2
 
-            if bbox_data[0][1] > min_gap_to_plot and bbox_data[0][
-                1] > y_val_buffer:  # then we should draw the connecting lines
-                # the bottom connecting line
+            if bbox_data[0][0] > min_gap_to_plot and bbox_data[0][
+                0] > x_val_buffer:  # then we should draw the connecting lines
+                # the left connecting line
                 lines.append(
-                    hierarchy_sp.LineInfo([(line_x, min_gap_to_plot), (line_x, bbox_data[0][1] - y_val_buffer)],
+                    hierarchy_sp.LineInfo([(min_gap_to_plot, line_y), (bbox_data[0][0] - x_val_buffer, line_y)],
                                           thickness=0.5, color='black'))
-                # the top connecting line
+                # the right connecting line
                 lines.append(
-                    hierarchy_sp.LineInfo([(line_x, bbox_data[1][1] + y_val_buffer), (line_x, 1 - min_gap_to_plot)],
+                    hierarchy_sp.LineInfo([(bbox_data[1][0] + x_val_buffer, line_y), (1 - min_gap_to_plot, line_y)],
                                           thickness=0.5, color='black'))
             else:
                 # the label is too large and there is no space to draw the connecting line
@@ -1366,25 +1418,25 @@ class RestrepoAnalysis:
     def _store_and_annotate_labels(self, dendro_info, labels_ax):
         # Draw the annotations onto text annotations onto axes
         annotation_list = []
-        for x_loc, lab_str in dendro_info['tick_to_profile_name_dict'].items():
+        for y_loc, lab_str in dendro_info['tick_to_profile_name_dict'].items():
             # fig.canvas.draw()
             annotation_list.append(
-                labels_ax.annotate(s=lab_str, xy=(x_loc, 0.5), rotation='vertical', horizontalalignment='center',
+                labels_ax.annotate(s=lab_str, xy=(0.5, y_loc), horizontalalignment='center',
                                    verticalalignment='center', fontsize='xx-small', fontweight='bold'))
         return annotation_list
 
-    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(self, list_of_heights):
+    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(self, list_of_widths):
         # in order (sub-cat, clade A, clade C, clade D)
-        plot_widths_list = [6,25,42,24]
+        plot_height_list = [6,25,42,24]
 
-        gs = gridspec.GridSpec(sum(list_of_heights), sum(plot_widths_list))
+        gs = gridspec.GridSpec( sum(plot_height_list), sum(list_of_widths))
         # 2d list where each list is a column contining multiple axes
 
         axarr = []
         # first set of axes that will be used to put the subcategory labels for the metainfo
         sub_cat_label_ax_list = []
-        for i in range(len(list_of_heights)):
-            temp_ax = plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), :plot_widths_list[0]])
+        for i in range(len(list_of_widths)):
+            temp_ax = plt.subplot(gs[:plot_height_list[0],sum(list_of_widths[:i]):sum(list_of_widths[: i + 1])])
             temp_ax.spines['top'].set_visible(False)
             temp_ax.spines['bottom'].set_visible(False)
             temp_ax.spines['right'].set_visible(False)
@@ -1400,18 +1452,18 @@ class RestrepoAnalysis:
         # then add the main data ax lists, one for each clade
         for clade in self.clades:
             clade_ax_list = []
-            for i in range(len(list_of_heights)):
+            for i in range(len(list_of_widths)):
                 if clade == 'A':
-                    col_index_start = plot_widths_list[0]
-                    col_index_end = sum(plot_widths_list[:2])
+                    col_index_start = plot_height_list[0]
+                    col_index_end = sum(plot_height_list[:2])
                 elif clade == 'C':
-                    col_index_start = sum(plot_widths_list[:2])
-                    col_index_end = sum(plot_widths_list[:3])
+                    col_index_start = sum(plot_height_list[:2])
+                    col_index_end = sum(plot_height_list[:3])
                 else:
-                    col_index_start = sum(plot_widths_list[:3])
-                    col_index_end = sum(plot_widths_list[:4])
+                    col_index_start = sum(plot_height_list[:3])
+                    col_index_end = sum(plot_height_list[:4])
 
-                clade_ax_list.append(plt.subplot(gs[sum(list_of_heights[:i]):sum(list_of_heights[: i + 1]), col_index_start:col_index_end]))
+                clade_ax_list.append(plt.subplot(gs[col_index_start:col_index_end, sum(list_of_widths[:i]):sum(list_of_widths[: i + 1])]))
             axarr.append(clade_ax_list)
 
 
@@ -1531,7 +1583,7 @@ class RestrepoAnalysis:
     def _draw_one_dendrogram(self, ax, labels, linkage, thickness_dict, plot_labels=True):
         return hierarchy_sp.dendrogram_sp(linkage, labels=labels, ax=ax,
                                          node_to_thickness_dict=thickness_dict,
-                                         default_line_thickness=0.5, leaf_rotation=90, no_labels=not plot_labels)
+                                         default_line_thickness=0.5, leaf_rotation=90, no_labels=not plot_labels, link_color_func=lambda k: '#000000', orientation='left')
 
     def histogram_of_all_abundance_values(self):
         """ Plot a histogram of all of the type-rel-abund pairings so that we can assess whether there is a sensible
@@ -1567,42 +1619,49 @@ class RestrepoAnalysis:
         """Creates a new df from the old df that has all of the values below the cutoff_abundance threshold
         made to 0. We will also calculate a new prof_uid_to_local_abund_dict_post_cutoff dictionary.
         """
+        if os.path.exists(os.path.join(self.cache_dir, 'prof_df_cutoff.p')):
+            self.prof_df_cutoff = pickle.load(open(os.path.join(self.cache_dir, 'prof_df_cutoff.p'), 'rb'))
+            self.prof_uid_to_local_abund_dict_post_cutoff = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_post_cutoff.p'), 'rb'))
+        else:
+            num_profs_pre_cutoff = len(list(self.profile_df))
+            print(f'There are {num_profs_pre_cutoff} ITS2 type profiles before applying cutoff of {self.cutoff_abund}')
+            # make new df from copy of old df
+            self.prof_df_cutoff = self.profile_df.copy()
+            # change values below cutoff to 0
+            self.prof_df_cutoff = self.prof_df_cutoff.mask(cond=self.prof_df_cutoff < self.cutoff_abund, other=0)
+            # now drop columns with 0
 
-        num_profs_pre_cutoff = len(list(self.profile_df))
-        print(f'There are {num_profs_pre_cutoff} ITS2 type profiles before applying cutoff of {self.cutoff_abund}')
-        # make new df from copy of old df
-        self.prof_df_cutoff = self.profile_df.copy()
-        # change values below cutoff to 0
-        self.prof_df_cutoff = self.prof_df_cutoff.mask(cond=self.prof_df_cutoff < self.cutoff_abund, other=0)
-        # now drop columns with 0
+            # now check to see if there are any type profiles that no longer have associations
+            # https://stackoverflow.com/questions/21164910/how-do-i-delete-a-column-that-contains-only-zeros-in-pandas
+            self.prof_df_cutoff = self.prof_df_cutoff.loc[:, (self.prof_df_cutoff != 0).any(axis=0)]
+            num_profs_post_cutoff = len(list(self.prof_df_cutoff))
+            print(f'There are {num_profs_post_cutoff} after.')
+            num_profs_removed = num_profs_pre_cutoff - num_profs_post_cutoff
+            print(f'{num_profs_removed} ITS2 type profiles have been removed from the dataframe.')
+            # get list of names of profiles removed due to cutoff
+            profs_removed = [self.prof_uid_to_name_dict[uid] for uid in
+                             list(self.profile_df) if
+                             uid not in list(self.prof_df_cutoff)]
+            print('These profiles were:')
+            for prof in profs_removed:
+                print(prof)
 
-        # now check to see if there are any type profiles that no longer have associations
-        # https://stackoverflow.com/questions/21164910/how-do-i-delete-a-column-that-contains-only-zeros-in-pandas
-        self.prof_df_cutoff = self.prof_df_cutoff.loc[:, (self.prof_df_cutoff != 0).any(axis=0)]
-        num_profs_post_cutoff = len(list(self.prof_df_cutoff))
-        print(f'There are {num_profs_post_cutoff} after.')
-        num_profs_removed = num_profs_pre_cutoff - num_profs_post_cutoff
-        print(f'{num_profs_removed} ITS2 type profiles have been removed from the dataframe.')
-        # get list of names of profiles removed due to cutoff
-        profs_removed = [self.prof_uid_to_name_dict[uid] for uid in
-                         list(self.profile_df) if
-                         uid not in list(self.prof_df_cutoff)]
-        print('These profiles were:')
-        for prof in profs_removed:
-            print(prof)
+            # calculate how many unique DataSetSample to ITS2 type profile associations there are.
+            num_associations_pre_cutoff = len(list(self.profile_df[self.profile_df > 0].stack().index))
+            num_associations_post_cutoff = len(list(self.prof_df_cutoff[self.prof_df_cutoff > 0].stack().index))
+            print(f'The number of unique DataSetSample to ITS2 type profile associations was {num_associations_pre_cutoff}.')
+            print(f'The number of unique DataSetSample to ITS2 type profile associations '
+                  f'after cutoff is {num_associations_post_cutoff}')
 
-        # calculate how many unique DataSetSample to ITS2 type profile associations there are.
-        num_associations_pre_cutoff = len(list(self.profile_df[self.profile_df > 0].stack().index))
-        num_associations_post_cutoff = len(list(self.prof_df_cutoff[self.prof_df_cutoff > 0].stack().index))
-        print(f'The number of unique DataSetSample to ITS2 type profile associations was {num_associations_pre_cutoff}.')
-        print(f'The number of unique DataSetSample to ITS2 type profile associations '
-              f'after cutoff is {num_associations_post_cutoff}')
+            # now populate the new prof_uid_to_local_abund_dict_post_cutoff dictionary
+            for i in list(self.prof_df_cutoff):  # for each column of the df
+                temp_series = self.prof_df_cutoff[i]
+                local_count = len(temp_series[temp_series > 0].index.values.tolist())
+                self.prof_uid_to_local_abund_dict_post_cutoff[i] = local_count
 
-        # now populate the new prof_uid_to_local_abund_dict_post_cutoff dictionary
-        for i in list(self.prof_df_cutoff):  # for each column of the df
-            temp_series = self.prof_df_cutoff[i]
-            local_count = len(temp_series[temp_series > 0].index.values.tolist())
-            self.prof_uid_to_local_abund_dict_post_cutoff[i] = local_count
+            #dump
+            pickle.dump(self.prof_df_cutoff, open(os.path.join(self.cache_dir, 'prof_df_cutoff.p'), 'wb'))
+            pickle.dump(self.prof_uid_to_local_abund_dict_post_cutoff, open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_post_cutoff.p'), 'wb'))
 
     def get_list_of_clade_col_type_uids_for_unifrac(self):
         """ This is code for getting tuples of (DataSetSample uid, AnalysisType uid).
@@ -1742,7 +1801,7 @@ class RestrepoAnalysis:
         apples = 'asdf'
 
 class MetaInfoPlotter:
-    def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_x_loc_dict, dend_ax, sub_cat_axarr, clade_index):
+    def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_y_loc_dict, dend_ax, sub_cat_axarr, clade_index):
         self.parent_analysis = parent_analysis
         self.ordered_prof_uid_list = ordered_uid_list
         self.clade_index = clade_index
@@ -1752,21 +1811,21 @@ class MetaInfoPlotter:
         self.sub_cat_axarr = sub_cat_axarr
         # set the x axis lims to match the dend_ax
         for ax, cat_ax, label, labpad in zip(self.meta_axarr, self.sub_cat_axarr, ['Species', 'Reef' ,'Depth', 'Reef\nType', 'Season'], [0,10,0,10,0]):
-            ax.set_xlim(dend_ax.get_xlim())
+            ax.set_ylim(dend_ax.get_ylim())
             # ax.spines['top'].set_visible(False)
             # ax.spines['bottom'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.spines['left'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['bottom'].set_visible(False)
             ax.set_xticks([])
             ax.set_yticks([])
-            ax.set_ylim((0, 1))
+            ax.set_xlim((0, 1))
             # if clade_index ==0:
             #     cat_ax.set_ylabel(label, rotation='vertical', fontweight='bold', fontsize='x-small',
             #                        verticalalignment='center', labelpad=labpad)
 
 
         self.prof_uid_to_smpl_uid_list_dict = prof_uid_to_smpl_uid_list_dict
-        self.prof_uid_to_x_loc_dict = prof_uid_to_x_loc_dict
+        self.prof_uid_to_y_loc_dict = prof_uid_to_y_loc_dict
         self.smpl_meta_df = self.parent_analysis.metadata_info_df
         # the space left between the info boxes of the plot
         # this should be set dynmaically at some point rather than hard coded
@@ -1836,13 +1895,13 @@ class MetaInfoPlotter:
             self.parent_meta_plotter = parent_meta_plotter
             self.prof_uid_list = self.parent_meta_plotter.ordered_prof_uid_list
             self.prof_uid_to_smpl_uid_list_dict = self.parent_meta_plotter.prof_uid_to_smpl_uid_list_dict
-            self.prof_x_loc_dict = self.parent_meta_plotter.prof_uid_to_x_loc_dict
+            self.prof_y_loc_dict = self.parent_meta_plotter.prof_uid_to_y_loc_dict
             self.meta_df = self.parent_meta_plotter.smpl_meta_df
             self.ax = ax
             self.cat_ax = cat_ax
-            x_loc_one = self.prof_x_loc_dict[self.prof_uid_list[0]]
-            x_loc_two = self.prof_x_loc_dict[self.prof_uid_list[1]]
-            self.dist_betwee_x_locs = x_loc_two - x_loc_one
+            y_loc_one = self.prof_y_loc_dict[self.prof_uid_list[0]]
+            y_loc_two = self.prof_y_loc_dict[self.prof_uid_list[1]]
+            self.dist_betwee_y_locs = y_loc_two - y_loc_one
             # the space left between the info boxes of the plot
             # this should be set dynmaically at some point rather than hard coded
             self.meta_box_buffer = self.parent_meta_plotter.meta_box_buffer
@@ -1853,23 +1912,23 @@ class MetaInfoPlotter:
             self.cat_labels = category_labels
 
         def plot(self):
-            y0_list, height_list = self._plot_data_ax()
+            x0_list, width_list = self._plot_data_ax()
 
             if self.parent_meta_plotter.clade_index == 0:
                 # only have to make the sub category plot once.
-                self._make_sub_category_plot(height_list, y0_list)
+                self._make_sub_category_plot(width_list, x0_list)
 
-        def _make_sub_category_plot(self, height_list, y0_list):
+        def _make_sub_category_plot(self, width_list, x0_list):
             # now populate the category axis with the sub category labels
             # y values will be the y0list + half the height
-            bar_height = height_list[0]
-            for cat_lab, y0_val in zip(self.cat_labels, y0_list):
+            bar_width = width_list[0]
+            for cat_lab, x0_val in zip(self.cat_labels, x0_list):
                 if self.category_df_header == 'species':  # italics
-                    self.cat_ax.annotate(s=cat_lab, xy=(1, y0_val + (0.5 * bar_height)), horizontalalignment='right',
-                                         verticalalignment='center', fontsize='xx-small', fontstyle='italic')
+                    self.cat_ax.annotate(s=cat_lab, xy=(x0_val + (0.5 * bar_width), 0), horizontalalignment='center',
+                                         verticalalignment='bottom', fontsize='xx-small', fontstyle='italic', rotation='vertical')
                 else:
-                    self.cat_ax.annotate(s=cat_lab, xy=(1, y0_val + (0.5 * bar_height)), horizontalalignment='right',
-                                         verticalalignment='center', fontsize='xx-small')
+                    self.cat_ax.annotate(s=cat_lab, xy=(x0_val + (0.5 * bar_width), 0), horizontalalignment='center',
+                                         verticalalignment='bottom', fontsize='xx-small', rotation='vertical')
 
         def _plot_data_ax(self):
             """We will plot a horizontal bar plot using rectangle patches"""
@@ -1881,37 +1940,37 @@ class MetaInfoPlotter:
                 counter = Counter(list_of_cat_instances)
 
                 # Then this only contains the one species and it should simply be the species color
-                x0_list, y0_list, width_list, height_list = self._get_rect_attributes(prof_uid, counter)
+                y0_list, x0_list, height_list, width_list,  = self._get_rect_attributes(prof_uid, counter)
 
                 for x, y, w, h, s in zip(x0_list, y0_list, width_list, height_list, self.category_list):
-                    if w > 0:
+                    if h > 0:
                         rect_p = patches.Rectangle(
                             xy=(x, y), width=w, height=h, facecolor=self.color_dict[s], edgecolor='none')
                         self.ax.add_patch(rect_p)
-            return y0_list, height_list
+            return x0_list, width_list
 
         def _get_rect_attributes(self, prof_uid, counter):
 
             num_categories = len(self.color_dict.items())
 
-            bar_height = (1/(num_categories))
-            y0_list = [i * bar_height for i in range(num_categories)]
-            height_list = [bar_height for _ in range(num_categories)]
+            bar_width = (1/(num_categories))
+            x0_list = [i * bar_width for i in range(num_categories)]
+            width_list = [bar_width for _ in range(num_categories)]
 
-            x_loc_of_prof = self.prof_x_loc_dict[prof_uid]
-            data_x0 = (x_loc_of_prof - (self.dist_betwee_x_locs / 2)) + self.meta_box_buffer
-            data_x1 = (x_loc_of_prof + (self.dist_betwee_x_locs / 2)) - self.meta_box_buffer
-            rect_width = data_x1 - data_x0
+            y_loc_of_prof = self.prof_y_loc_dict[prof_uid]
+            data_y0 = (y_loc_of_prof - (self.dist_betwee_y_locs / 2)) + self.meta_box_buffer
+            data_y1 = (y_loc_of_prof + (self.dist_betwee_y_locs / 2)) - self.meta_box_buffer
+            rect_height = data_y1 - data_y0
 
-            width_list = []
+            heights_list = []
             num_samples = sum(counter.values())
             for cat in self.category_list:
                 if cat in counter:
-                    width_list.append((counter[cat]/num_samples)*rect_width)
+                    heights_list.append((counter[cat]/num_samples)*rect_height)
                 else:
-                    width_list.append(0)
-            x0_list = [data_x0 for _ in range(num_categories)]
-            return x0_list, y0_list, width_list, height_list
+                    heights_list.append(0)
+            y0_list = [data_y0 for _ in range(num_categories)]
+            return y0_list, x0_list, heights_list, width_list,
 
 
 if __name__ == "__main__":
@@ -1951,7 +2010,7 @@ if __name__ == "__main__":
         clade_D_smpl_dist_path=os.path.join(
             'between_sample_distance_sqrt_trans', 'D',
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
-        ignore_cache=True, cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis')
+        cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis')
     rest_analysis.make_dendrogram_with_meta_all_clades()
     # rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis.make_sample_balance_figure()
