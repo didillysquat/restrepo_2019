@@ -866,6 +866,7 @@ class RestrepoAnalysis:
 
                 print('saving fig')
                 plt.savefig(os.path.join(self.parent.figure_dir, 'map_balance.png'), dpi=1200)
+                plt.savefig(os.path.join(self.parent.figure_dir, 'map_balance.svg'), dpi=1200)
 
                 apples = 'asdf'
 
@@ -1008,12 +1009,46 @@ class RestrepoAnalysis:
 
             def _draw_big_map(self):
                 self.large_map_ax = plt.subplot(self.outer_gs[0:1, 0:1], projection=ccrs.PlateCarree(), zorder=1)
-                self.large_map_ax.set_extent(extents=(38.7, 39.3, 22.0, 22.6))
-                land_10m, ocean_10m = self._get_naural_earth_features_big_map()
-                self._draw_natural_earth_features_big_map(land_10m, ocean_10m)
+                x0_extent, x1_extent, y0_extent, y1_extent = 38.7, 39.3, 22.0, 22.6
+
+                self.large_map_ax.set_extent(extents=(x0_extent, x1_extent, y0_extent, y1_extent))
+                # land_10m, ocean_10m = self._get_naural_earth_features_big_map()
+                # self._draw_natural_earth_features_big_map(land_10m, ocean_10m)
+                self._add_land_and_sea_to_inset(self.large_map_ax, x0_extent, x1_extent, y0_extent, y1_extent)
                 self._put_gridlines_on_large_map_ax()
                 self._annotate_big_map()
                 # self._draw_reefs_on_map(self.large_map_ax)
+
+            def _add_land_and_sea_to_inset(self, map_ax, x0_extent, x1_extent, y0_extent, y1_extent):
+                x_s, y_s = self._add_kml_file_to_ax(ax=map_ax,
+                                                    kml_path=os.path.join(self.parent.gis_input_base_path, 'restrepo_coastline.kml'))
+                poly_xy = [[x, y] for x, y in zip(x_s, y_s)]
+                # add top right and bottom right
+                poly_xy.extend([[x1_extent, y1_extent], [x1_extent, y0_extent]])
+                land_poly = Polygon(poly_xy, closed=True, fill=True, color=(238 / 255, 239 / 255, 219 / 255))
+                map_ax.add_patch(land_poly)
+                # now do the seq poly
+                poly_xy = [[x, y] for x, y in zip(x_s, y_s)]
+                # add top left and bottom left
+                poly_xy.extend([[x0_extent, y1_extent], [x0_extent, y0_extent]])
+                sea_poly = Polygon(poly_xy, closed=True, fill=True, color=(136 / 255, 182 / 255, 224 / 255))
+                map_ax.add_patch(sea_poly)
+
+            def _add_kml_file_to_ax(self, ax, kml_path, linewidth=0.8, linestyle='-', color='black', ):
+                with open(kml_path, 'r') as f:
+                    file = [line.rstrip().lstrip() for line in f]
+                for i, line in enumerate(file):
+                    if '<coordinates>' in line:
+                        coords = file[i + 1]
+                        break
+                coords_tup_list_str = coords.split(' ')
+                x_y_tups_of_feature = []
+                for tup in coords_tup_list_str:
+                    x_y_tups_of_feature.append([float(_) for _ in tup.split(',')[:-1]])
+                x_s = [_[0] for _ in x_y_tups_of_feature]
+                y_s = [_[1] for _ in x_y_tups_of_feature]
+                ax.plot(x_s, y_s, linewidth=linewidth, linestyle=linestyle, color=color)
+                return x_s, y_s
 
             def _draw_reefs_on_map(self, map_ax):
                 for i in range(1, 33, 1):
@@ -2012,9 +2047,9 @@ if __name__ == "__main__":
             'between_sample_distance_sqrt_trans', 'D',
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
         cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis')
-    rest_analysis.make_dendrogram_with_meta_all_clades()
+    # rest_analysis.make_dendrogram_with_meta_all_clades()
     # rest_analysis.plot_pcoa_of_cladal()
-    # rest_analysis.make_sample_balance_figure()
+    rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_sample_permanova()
 
     # rest_analysis.make_sample_balance_figure()
