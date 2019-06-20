@@ -68,7 +68,7 @@ class RestrepoAnalysis:
                  clade_A_profile_dist_path, clade_C_profile_dist_path, clade_D_profile_dist_path,
                  clade_A_smpl_dist_path, clade_C_smpl_dist_path, clade_D_smpl_dist_path,
                  clade_A__profile_dist_cct_specific_path=None, clade_C_profile_dist_cct_specific_path=None,
-                 clade_D__profile_dist_cct_specific_path=None, ignore_cache=False, meta_data_input_path=None, cutoff_abund=None, gis_path=None):
+                 clade_D__profile_dist_cct_specific_path=None, ignore_cache=False, meta_data_input_path=None, cutoff_abund=None, gis_path=None, hobo_dir=None):
         # Although we see clade F in the dataset this is minimal and so we will
         # tackle this sepeately to the analysis of the A, C and D.
         self.cwd = os.path.dirname(os.path.realpath(__file__))
@@ -82,6 +82,7 @@ class RestrepoAnalysis:
         self.profile_abs_abund_ouput_path = os.path.join(self.base_input_dir, profile_abs_abund_ouput_path)
         self.seq_rel_abund_ouput_path = os.path.join(self.base_input_dir, seq_rel_abund_ouput_path)
         self.seq_abs_abund_ouput_path = os.path.join(self.base_input_dir, seq_abs_abund_ouput_path)
+        self.hobo_dir = hobo_dir
         # Paths to the standard output profile distance files
         self.profile_clade_dist_path_dict = {
             'A' : os.path.join(self.base_input_dir, clade_A_profile_dist_path),
@@ -146,6 +147,11 @@ class RestrepoAnalysis:
             self.cutoff_abund = cutoff_abund
             self.prof_df_cutoff = None
 
+
+        # temperature df
+        self.temperature_df = None
+        self._make_temp_df()
+
         # sequence abundnace df
         self.seq_df = self._populate_seq_abund_df()
 
@@ -183,6 +189,68 @@ class RestrepoAnalysis:
 
         self._del_propblem_sample()
 
+    def _make_temp_df(self):
+        temperature_df = pd.DataFrame()
+        files = [f for f in os.listdir(self.hobo_dir) if '.csv' in f]
+        for f in files:
+            temp_df = pd.read_csv(os.path.join(self.hobo_dir, f), names=['ind', 'date', 'temp'])
+            temp_df.set_index('date', drop=True, inplace=True)
+            temp_df.drop(columns='ind', inplace=True)
+            temp_df = temp_df.dropna()
+            temperature_df[f.replace('.csv', '')] = temp_df['temp']
+        self.temperature_df = temperature_df.loc[:'7/23/17 00:00', :]
+        index_len = len(self.temperature_df.index.values.tolist())
+        sample_ind = list(range(0,index_len, 10))
+        # subsample to one in ten points
+        self.temperature_df = self.temperature_df.iloc[sample_ind]
+        apples = 'asdf'
+
+
+
+    def _plot_temperature(self):
+        fig = plt.figure(figsize=(8, 4))
+        gs = gridspec.GridSpec(6, 4)
+
+        # average plots
+        temp_across_depth = plt.subplot(gs[:3, :2])
+        temp_across_reef_type = plt.subplot(gs[3:, :2])
+
+        # inshore
+        inshore_fsar = plt.subplot(gs[:2, 2:3])
+        inshore_tahala = plt.subplot(gs[:2, 3:4])
+
+        # midshore
+        midshore_al_fahal = plt.subplot(gs[2:4, 2:3])
+        midshore_quita_al_kirsh = plt.subplot(gs[2:4, 3:4])
+
+        # offshore
+        offshore_shib_nazar = plt.subplot(gs[4:6, 2:3])
+        offshore_abud_madafi = plt.subplot(gs[4:6, 3:4])
+
+        indi_axarr = []
+        indi_axarr.extend([inshore_fsar, inshore_tahala, midshore_al_fahal, midshore_quita_al_kirsh, offshore_shib_nazar, offshore_abud_madafi])
+
+        reef_order = ['Fsar', 'Tahla', 'Al Fahal', 'Qita al Kirsh', 'Shib Nazar', 'Abu Madafi']
+        abbrev_dict = {'Fsar': 'f', 'Tahla': 't', 'Qita al Kirsh': 'q', 'Al Fahal': 'af',
+                                                         'Shib Nazar': 'sn', 'Abu Madafi': 'am'}
+        x = self.temperature_df.index.values.tolist()
+        ax_ind = -1
+        for reef in reef_order:
+            count = 0
+            ax_ind += 1
+            for depth in ['1', '15', '30']:
+                column_header = f'{abbrev_dict[reef]}_{depth}'
+                if column_header in list(self.temperature_df):
+                    count += 1
+                    y = self.temperature_df[column_header].values.tolist()
+                    indi_axarr[ax_ind].plot(x,y)
+            if count == 0:
+                # then there was no data for this site and we should plot the words 'no data'
+                indi_axarr[ax_ind].set_ylim(0, 1)
+                indi_axarr[ax_ind].set_xlim(0, 1)
+                indi_axarr[ax_ind].text(x=0.5, y=0.5, s='no data', horizontalalignment='center', verticalalignment='center', fontsize='small')
+
+
     def _del_propblem_sample(self):
         """ THis is originally done in the meta info df creation but using the cache system sometimes
         meant that this was being skipped. I have put it in here so that it is never skipped and the sample
@@ -192,6 +260,9 @@ class RestrepoAnalysis:
             if name == 'FS15SE8_FS15SE8_N705-S508':
                 self.seq_df.drop(index=uid, inplace=True, errors='ignore')
                 self.profile_df.drop(index=uid, inplace=True, errors='ignore')
+                self.clade_prop_pcoa_coords.drop(index=uid, inplace=True, errors='ignore')
+                self.clade_proportion_df.drop(index=uid, inplace=True, errors='ignore')
+                self.clade_proportion_df_non_normalised.drop(index=uid, inplace=True, errors='ignore')
                 if self.prof_df_cutoff is not None:
                     self.prof_df_cutoff.drop(index=uid, inplace=True, errors='ignore')
                 if self.sample_clade_dist_df_dict:
@@ -694,7 +765,7 @@ class RestrepoAnalysis:
                 self._plot_clade_proportion_ordinations()
 
                 plt.savefig(os.path.join(self.parent.figure_dir, 'ordination_figure.png'), dpi=1200)
-                apples = 'asdf'
+                plt.savefig(os.path.join(self.parent.figure_dir, 'ordination_figure.svg'), dpi=1200)
 
             def _plot_clade_proportion_ordinations(self):
                 # now plot up the clade_proportion ordination
@@ -1838,7 +1909,7 @@ class RestrepoAnalysis:
 
 class MetaInfoPlotter:
     def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_y_loc_dict, dend_ax, sub_cat_axarr, clade_index):
-        self.parent_analysis = parent_analysis
+        self.parent = parent_analysis
         self.ordered_prof_uid_list = ordered_uid_list
         self.clade_index = clade_index
         # these are the axes that will display the actual data
@@ -1862,7 +1933,7 @@ class MetaInfoPlotter:
 
         self.prof_uid_to_smpl_uid_list_dict = prof_uid_to_smpl_uid_list_dict
         self.prof_uid_to_y_loc_dict = prof_uid_to_y_loc_dict
-        self.smpl_meta_df = self.parent_analysis.metadata_info_df
+        self.smpl_meta_df = self.parent.metadata_info_df
         # the space left between the info boxes of the plot
         # this should be set dynmaically at some point rather than hard coded
         self.meta_box_buffer = 1
@@ -1882,7 +1953,7 @@ class MetaInfoPlotter:
             'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E'}
         category_list = ['M', 'G', 'GX',  'P', 'PC', 'SE', 'ST']
         category_labels = ['M. dichotoma', 'G. planulata', 'G. fascicularis', 'Porites spp.', 'P. verrucosa', 'S. hystrix', 'S. pistillata']
-        self.species_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0], cat_ax=self.sub_cat_axarr[0], color_dict=color_dict,
+        self.species_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[0], cat_ax=self.sub_cat_axarr[0], color_dict=self.parent.old_color_dict,
                                                category_list=category_list, category_df_header='species', category_labels=category_labels)
         self.species_plotter.plot()
 
@@ -1895,7 +1966,7 @@ class MetaInfoPlotter:
 
 
         category_labels = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
-        self.reef_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[1], cat_ax=self.sub_cat_axarr[1], color_dict=color_dict,
+        self.reef_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[1], cat_ax=self.sub_cat_axarr[1], color_dict=self.parent.old_color_dict,
                                                category_list=category_list, category_df_header='reef', category_labels=category_labels)
         self.reef_plotter.plot()
 
@@ -1904,7 +1975,7 @@ class MetaInfoPlotter:
             1:'#CAE1FF', 15: '#2E37FE', 30: '#000080'}
         category_list = [30, 15, 1]
         category_labels = ['30 m', '15 m', '1 m']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], cat_ax=self.sub_cat_axarr[2],color_dict=color_dict,
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], cat_ax=self.sub_cat_axarr[2],color_dict=self.parent.old_color_dict,
                                                category_list=category_list, category_df_header='depth', category_labels=category_labels)
         self.depth_plotter.plot()
 
@@ -1913,7 +1984,7 @@ class MetaInfoPlotter:
             'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000'}
         category_list = ['Offshore', 'Midshelf', 'Inshore']
         category_labels = ['Offshore', 'Midshelf', 'Inshore']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], cat_ax=self.sub_cat_axarr[3],color_dict=color_dict,
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], cat_ax=self.sub_cat_axarr[3],color_dict=self.parent.old_color_dict,
                                              category_list=category_list, category_df_header='reef_type', category_labels=category_labels)
         self.depth_plotter.plot()
 
@@ -1922,7 +1993,7 @@ class MetaInfoPlotter:
             'Summer': '#FF0000', 'Winter': '#00BFFF'}
         category_list = ['Summer', 'Winter']
         category_labels = ['Summer', 'Winter']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[4], cat_ax=self.sub_cat_axarr[4],color_dict=color_dict,
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[4], cat_ax=self.sub_cat_axarr[4],color_dict=self.parent.old_color_dict,
                                              category_list=category_list, category_df_header='season', category_labels=category_labels)
         self.depth_plotter.plot()
 
@@ -1987,7 +2058,7 @@ class MetaInfoPlotter:
 
         def _get_rect_attributes(self, prof_uid, counter):
 
-            num_categories = len(self.color_dict.items())
+            num_categories = len(self.category_list.items())
 
             bar_width = (1/(num_categories))
             x0_list = [i * bar_width for i in range(num_categories)]
@@ -2046,10 +2117,13 @@ if __name__ == "__main__":
         clade_D_smpl_dist_path=os.path.join(
             'between_sample_distance_sqrt_trans', 'D',
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
-        cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis')
+        cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis',
+        hobo_dir = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/HOBO/hobo_csv')
     # rest_analysis.make_dendrogram_with_meta_all_clades()
     # rest_analysis.plot_pcoa_of_cladal()
-    rest_analysis.make_sample_balance_figure()
+    rest_analysis._plot_temperature()
+    foo = 'asdf'
+    # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_sample_permanova()
 
     # rest_analysis.make_sample_balance_figure()
