@@ -150,6 +150,8 @@ class RestrepoAnalysis:
 
         # temperature df
         self.temperature_df = None
+        self.daily_temperature_av_df = None
+        self.daily_temperature_range_df = None
         self._make_temp_df()
 
         # sequence abundnace df
@@ -190,6 +192,8 @@ class RestrepoAnalysis:
         self._del_propblem_sample()
 
     def _make_temp_df(self):
+        # We should plot the daily averages rather then every point as readability suffers. We can then do
+        # a seperate subplot that has a comparison of the daily variance
         temperature_df = pd.DataFrame()
         files = [f for f in os.listdir(self.hobo_dir) if '.csv' in f]
         for f in files:
@@ -199,33 +203,71 @@ class RestrepoAnalysis:
             temp_df = temp_df.dropna()
             temperature_df[f.replace('.csv', '')] = temp_df['temp']
         self.temperature_df = temperature_df.loc[:'7/23/17 00:00', :]
-        index_len = len(self.temperature_df.index.values.tolist())
-        sample_ind = list(range(0,index_len, 10))
-        # subsample to one in ten points
-        self.temperature_df = self.temperature_df.iloc[sample_ind]
+
+        # now calculate the daily averages. Work from 00:00 to 23:00 for each bin
+        # at the same time we can calculate the daily range for each day
+        daily_average_temp_dict = {}
+        daily_range_temp_dict = {}
+        # a list for each of the hobo columns
+        daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
+        current_day = None
+        for time_ind in self.temperature_df.index.values.tolist():
+            if '00:00' in time_ind:
+                if daily_temperature_bin_lists and len(daily_temperature_bin_lists[0]) == 24: # must be a full set of data
+                    # then we should bank calculate what we have in the bin_list and populate a new item in the bin_dict
+                    average_values = [sum(bin_list)/len(bin_list) for bin_list in daily_temperature_bin_lists]
+                    daily_ranges = [max(bin_list)-min(bin_list) for bin_list in daily_temperature_bin_lists]
+                    daily_average_temp_dict[current_day] = average_values
+                    daily_range_temp_dict[current_day] = daily_ranges
+                    daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
+                    self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
+                elif daily_temperature_bin_lists and len(daily_temperature_bin_lists[0]) != 24:
+                    # then we have a partial set of data and we don't want to calculate an average from this
+                    daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
+                    self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
+            else:
+                # update the current day we are on and add the temp data to the bin_lists
+                current_day = time_ind.split(' ')[0]
+                self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
+        if len(daily_temperature_bin_lists[0]) == 24:
+            # then we have one last full set of data
+            average_values = [sum(bin_list) / len(bin_list) for bin_list in daily_temperature_bin_lists]
+            daily_average_temp_dict[current_day] = average_values
+            daily_range_temp_dict[current_day] = daily_ranges
+        self.daily_temperature_av_df = pd.DataFrame.from_dict(data=daily_average_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
+        self.daily_temperature_range_df = pd.DataFrame.from_dict(data=daily_range_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
+
+
+        # index_len = len(self.temperature_df.index.values.tolist())
+        # sample_ind = list(range(0,index_len, 2))
+        # # subsample to one in ten points
+        # self.temperature_df = self.temperature_df.iloc[sample_ind]
         apples = 'asdf'
 
-
+    def _populate_bin_list_for_single_time(self, bin_lists, time_ind):
+        for i, temp_val in enumerate(self.temperature_df.loc[time_ind].values.tolist()):
+            bin_lists[i].append(temp_val)
 
     def _plot_temperature(self):
         fig = plt.figure(figsize=(8, 4))
-        gs = gridspec.GridSpec(6, 4)
+        # we will put a gap of 1 row in for the site plots
+        gs = gridspec.GridSpec(20, 18)
 
         # average plots
-        temp_across_depth = plt.subplot(gs[:3, :2])
-        temp_across_reef_type = plt.subplot(gs[3:, :2])
+        one_m_all_sites = plt.subplot(gs[:9, :8])
+        fifteen_m_all_sites = plt.subplot(gs[11:, :8])
 
         # inshore
-        inshore_fsar = plt.subplot(gs[:2, 2:3])
-        inshore_tahala = plt.subplot(gs[:2, 3:4])
+        inshore_fsar = plt.subplot(gs[:6, 9:13])
+        inshore_tahala = plt.subplot(gs[:6, 14:18])
 
         # midshore
-        midshore_al_fahal = plt.subplot(gs[2:4, 2:3])
-        midshore_quita_al_kirsh = plt.subplot(gs[2:4, 3:4])
+        midshore_al_fahal = plt.subplot(gs[7:13, 9:13])
+        midshore_quita_al_kirsh = plt.subplot(gs[7:13, 14:118])
 
         # offshore
-        offshore_shib_nazar = plt.subplot(gs[4:6, 2:3])
-        offshore_abud_madafi = plt.subplot(gs[4:6, 3:4])
+        offshore_shib_nazar = plt.subplot(gs[14:20, 9:13])
+        offshore_abud_madafi = plt.subplot(gs[14:20, 14:18])
 
         indi_axarr = []
         indi_axarr.extend([inshore_fsar, inshore_tahala, midshore_al_fahal, midshore_quita_al_kirsh, offshore_shib_nazar, offshore_abud_madafi])
@@ -233,6 +275,8 @@ class RestrepoAnalysis:
         reef_order = ['Fsar', 'Tahla', 'Al Fahal', 'Qita al Kirsh', 'Shib Nazar', 'Abu Madafi']
         abbrev_dict = {'Fsar': 'f', 'Tahla': 't', 'Qita al Kirsh': 'q', 'Al Fahal': 'af',
                                                          'Shib Nazar': 'sn', 'Abu Madafi': 'am'}
+        # line_style_dict = {'1':'-', '15':'-.', '30':'--'}
+        line_color_dict = {'1': '#CAE1FF', '15': '#2E37FE', '30': '#000080'}
         x = self.temperature_df.index.values.tolist()
         ax_ind = -1
         for reef in reef_order:
@@ -243,13 +287,51 @@ class RestrepoAnalysis:
                 if column_header in list(self.temperature_df):
                     count += 1
                     y = self.temperature_df[column_header].values.tolist()
-                    indi_axarr[ax_ind].plot(x,y)
+                    # indi_axarr[ax_ind].plot(x,y, linestyle=line_style_dict[depth], c=line_color_dict[depth], lw='0.5')
+                    indi_axarr[ax_ind].plot(x,y,  c=line_color_dict[depth], lw='0.2')
+
             if count == 0:
                 # then there was no data for this site and we should plot the words 'no data'
                 indi_axarr[ax_ind].set_ylim(0, 1)
                 indi_axarr[ax_ind].set_xlim(0, 1)
                 indi_axarr[ax_ind].text(x=0.5, y=0.5, s='no data', horizontalalignment='center', verticalalignment='center', fontsize='small')
+                indi_axarr[ax_ind].set_xticks([])
+                indi_axarr[ax_ind].set_yticks([])
+            else:
+                indi_axarr[ax_ind].set_ylim(24,34)
+                indi_axarr[ax_ind].set_yticks([24, 26, 28, 30, 32, 34])
+                indi_axarr[ax_ind].grid()
+                indi_axarr[ax_ind].set_xticks([])
+                # indi_axarr[ax_ind].patch.set_facecolor('#DCDCDC')
 
+        # now plot the other two
+        # first plot the 1m plot on top
+        x = self.daily_temperature_av_df.index.values.tolist()
+        for reef in reef_order:
+            column_header = f'{abbrev_dict[reef]}_{1}'
+            if column_header in list(self.temperature_df):
+                y = self.daily_temperature_av_df[column_header].values.tolist()
+                one_m_all_sites.plot(x, y, c=self.old_color_dict[reef], lw='0.5')
+        one_m_all_sites.set_ylim(24, 34)
+        one_m_all_sites.set_yticks([24, 26, 28, 30, 32, 34])
+        one_m_all_sites.grid()
+        one_m_all_sites.set_xticks([])
+
+        # now plot the other two
+        # first plot the 1m plot on top
+        for reef in reef_order:
+            column_header = f'{abbrev_dict[reef]}_{15}'
+            if column_header in list(self.temperature_df):
+                y = self.daily_temperature_av_df[column_header].values.tolist()
+                fifteen_m_all_sites.plot(x, y, c=self.old_color_dict[reef], lw='0.5')
+        fifteen_m_all_sites.set_ylim(24, 34)
+        fifteen_m_all_sites.set_yticks([24, 26, 28, 30, 32, 34])
+        fifteen_m_all_sites.grid()
+        fifteen_m_all_sites.set_xticks([])
+
+        # plt.tight_layout()
+        apples = 'asdf'
+        plt.savefig(os.path.join(self.figure_dir, 'temp_plot_white.png'), dpi=1200)
 
     def _del_propblem_sample(self):
         """ THis is originally done in the meta info df creation but using the cache system sometimes
