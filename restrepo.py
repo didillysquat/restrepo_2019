@@ -249,9 +249,9 @@ class RestrepoAnalysis:
             bin_lists[i].append(temp_val)
 
     def _plot_temperature(self):
-        fig = plt.figure(figsize=(8, 4))
+        fig = plt.figure(figsize=(12, 4))
         # we will put a gap of 1 row in for the site plots
-        gs = gridspec.GridSpec(20, 18)
+        gs = gridspec.GridSpec(20, 27)
 
         # average plots
         one_m_all_sites = plt.subplot(gs[:9, :8])
@@ -263,11 +263,14 @@ class RestrepoAnalysis:
 
         # midshore
         midshore_al_fahal = plt.subplot(gs[7:13, 9:13])
-        midshore_quita_al_kirsh = plt.subplot(gs[7:13, 14:118])
+        midshore_quita_al_kirsh = plt.subplot(gs[7:13, 14:18])
 
         # offshore
         offshore_shib_nazar = plt.subplot(gs[14:20, 9:13])
         offshore_abud_madafi = plt.subplot(gs[14:20, 14:18])
+
+        # boxplot
+        box_plot_ax = plt.subplot(gs[4:16, 19:])
 
         indi_axarr = []
         indi_axarr.extend([inshore_fsar, inshore_tahala, midshore_al_fahal, midshore_quita_al_kirsh, offshore_shib_nazar, offshore_abud_madafi])
@@ -277,7 +280,7 @@ class RestrepoAnalysis:
                                                          'Shib Nazar': 'sn', 'Abu Madafi': 'am'}
         # line_style_dict = {'1':'-', '15':'-.', '30':'--'}
         line_color_dict = {'1': '#CAE1FF', '15': '#2E37FE', '30': '#000080'}
-        x = self.temperature_df.index.values.tolist()
+        x = self.daily_temperature_av_df.index.values.tolist()
         ax_ind = -1
         for reef in reef_order:
             count = 0
@@ -286,7 +289,7 @@ class RestrepoAnalysis:
                 column_header = f'{abbrev_dict[reef]}_{depth}'
                 if column_header in list(self.temperature_df):
                     count += 1
-                    y = self.temperature_df[column_header].values.tolist()
+                    y = self.daily_temperature_av_df[column_header].values.tolist()
                     # indi_axarr[ax_ind].plot(x,y, linestyle=line_style_dict[depth], c=line_color_dict[depth], lw='0.5')
                     indi_axarr[ax_ind].plot(x,y,  c=line_color_dict[depth], lw='0.2')
 
@@ -305,7 +308,50 @@ class RestrepoAnalysis:
                 # indi_axarr[ax_ind].patch.set_facecolor('#DCDCDC')
 
         # now plot the other two
-        # first plot the 1m plot on top
+
+        x = self._plot_one_m_temp(one_m_all_sites, reef_order, abbrev_dict)
+
+        self._plot_fifteen_m_temp(fifteen_m_all_sites, reef_order, abbrev_dict)
+
+        # now do the box plot
+        self._plot_temp_box_plots(box_plot_ax)
+
+        # plt.tight_layout()
+        apples = 'asdf'
+        plt.savefig(os.path.join(self.figure_dir, 'temp_plot.png'), dpi=1200)
+        plt.savefig(os.path.join(self.figure_dir, 'temp_plot.svg'), dpi=1200)
+
+    def _plot_temp_box_plots(self, box_plot_ax):
+        # first get the individual hobo lists
+        list_to_plot = [self.daily_temperature_range_df[col_name].values.tolist() for col_name in
+                        list(self.daily_temperature_range_df)]
+        # then get a list for each of the depth averages
+        for depth in ['1', '15', '30']:
+            temp_depth_list = []
+            for col in list(self.daily_temperature_range_df):
+                if col.endswith(depth):
+                    temp_depth_list.extend(self.daily_temperature_range_df[col].values.tolist())
+            list_to_plot.append(temp_depth_list)
+        box_plot_ax.boxplot(list_to_plot, flierprops={'markersize': 1})
+        labels = list(self.daily_temperature_range_df)
+        labels.extend(['1m', '15m', '30m'])
+        box_plot_ax.set_xticklabels(labels, rotation='vertical')
+        # box_plot_ax.patch.set_facecolor('#DCDCDC')
+
+    def _plot_fifteen_m_temp(self, fifteen_m_all_sites, reef_order, abbrev_dict):
+        x = self.daily_temperature_av_df.index.values.tolist()
+        for reef in reef_order:
+            column_header = f'{abbrev_dict[reef]}_{15}'
+            if column_header in list(self.temperature_df):
+                y = self.daily_temperature_av_df[column_header].values.tolist()
+                fifteen_m_all_sites.plot(x, y, c=self.old_color_dict[reef], lw='0.5')
+        fifteen_m_all_sites.set_ylim(24, 34)
+        fifteen_m_all_sites.set_yticks([24, 26, 28, 30, 32, 34])
+        fifteen_m_all_sites.grid()
+        fifteen_m_all_sites.set_xticks([])
+        # fifteen_m_all_sites.patch.set_facecolor('#DCDCDC')
+
+    def _plot_one_m_temp(self, one_m_all_sites, reef_order,abbrev_dict):
         x = self.daily_temperature_av_df.index.values.tolist()
         for reef in reef_order:
             column_header = f'{abbrev_dict[reef]}_{1}'
@@ -316,22 +362,8 @@ class RestrepoAnalysis:
         one_m_all_sites.set_yticks([24, 26, 28, 30, 32, 34])
         one_m_all_sites.grid()
         one_m_all_sites.set_xticks([])
-
-        # now plot the other two
-        # first plot the 1m plot on top
-        for reef in reef_order:
-            column_header = f'{abbrev_dict[reef]}_{15}'
-            if column_header in list(self.temperature_df):
-                y = self.daily_temperature_av_df[column_header].values.tolist()
-                fifteen_m_all_sites.plot(x, y, c=self.old_color_dict[reef], lw='0.5')
-        fifteen_m_all_sites.set_ylim(24, 34)
-        fifteen_m_all_sites.set_yticks([24, 26, 28, 30, 32, 34])
-        fifteen_m_all_sites.grid()
-        fifteen_m_all_sites.set_xticks([])
-
-        # plt.tight_layout()
-        apples = 'asdf'
-        plt.savefig(os.path.join(self.figure_dir, 'temp_plot_white.png'), dpi=1200)
+        # one_m_all_sites.patch.set_facecolor('#DCDCDC')
+        return x
 
     def _del_propblem_sample(self):
         """ THis is originally done in the meta info df creation but using the cache system sometimes
