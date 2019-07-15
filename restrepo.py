@@ -80,7 +80,7 @@ class RestrepoAnalysis:
         # Paths to raw info files
         self.profile_rel_abund_ouput_path = os.path.join(self.base_input_dir, profile_rel_abund_ouput_path)
         self.profile_abs_abund_ouput_path = os.path.join(self.base_input_dir, profile_abs_abund_ouput_path)
-        self.seq_rel_abund_ouput_path = os.path.join(self.base_input_dir, seq_rel_abund_ouput_path)
+        self.seq_rel_abund_post_med_ouput_path = os.path.join(self.base_input_dir, seq_rel_abund_ouput_path)
         self.seq_abs_abund_ouput_path = os.path.join(self.base_input_dir, seq_abs_abund_ouput_path)
         self.hobo_dir = hobo_dir
         # Paths to the standard output profile distance files
@@ -154,22 +154,22 @@ class RestrepoAnalysis:
         self.daily_temperature_range_df = None
         self._make_temp_df()
 
-        # sequence abundnace df
-        self.seq_df = self._populate_seq_abund_df()
+        self.post_med_seq_abundance_relative_df = self._post_med_seq_abundance_relative_df()
+        self.seq_meta_data_df = self._populate_seq_meta_data_df()
 
         # metadata_info_df
         if meta_data_input_path is not None:
-            self.metadata_info_df = self._init_metadata_info_df(meta_data_input_path)
+            self.experimental_metadata_info_df = self._init_metadata_info_df(meta_data_input_path)
         else:
-            self.metadata_info_df = None
+            self.experimental_metadata_info_df = None
 
         # clade proportion dfs (must be made after meta_data)
         # this df actually has the proportions normalised to 100 000 sequences
         self.clade_proportion_df = pd.DataFrame(columns=list('ACD'),
-                                                index=self.seq_df.index.values.tolist())
+                                                index=self.post_med_seq_abundance_relative_df.index.values.tolist())
         # this one is the actual proportions (i.e. 0.03, 0.97, 0.00)
         self.clade_proportion_df_non_normalised = pd.DataFrame(columns=list('ACD'),
-                                                index=self.seq_df.index.values.tolist())
+                                                               index=self.post_med_seq_abundance_relative_df.index.values.tolist())
         self.clade_prop_pcoa_coords = None
         self._create_clade_prop_distances()
 
@@ -191,58 +191,100 @@ class RestrepoAnalysis:
 
         self._del_propblem_sample()
 
+    def _populate_seq_meta_data_df(self):
+        """This method will produce a dataframe that has sample UID as the key and the QC metadata items as the
+        columns"""
+        with open(self.seq_abs_abund_ouput_path, 'r') as f:
+            seq_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
+
+        df = pd.DataFrame(seq_data)
+        foo = 'bar'
+
+    def _quaternary_plot(self):
+        class QuantPlot:
+            def __init__(self, parent):
+                self.parent = parent
+                # first port of call is to see what the maximum number of types is
+                dd = defaultdict(int)
+                df = self.parent.profile_df
+                for uid_ind in df.index.values.tolist():
+                    temp_series = df.loc[uid_ind]
+                    temp_series_non_zero_series = temp_series[temp_series > 0]
+                    non_zero_indices = temp_series_non_zero_series.index.values.tolist()
+                    if len(non_zero_indices) == 4:
+                        foo = 'asdf'
+                    dd[len(non_zero_indices)] += 1
+
+                self.fig = plt.figure(figsize=(8, 8))
+                # one row for each clade, for the between sample ordinations
+                # one row for the clade proportion ordination
+                # one row for the legends
+                # one column per meta info category i.e. species, reef, reef_type, etc.
+                self.gs = gridspec.GridSpec(1, 1)
+                self.quat_ax = plt.subplot(self.gs[0:1, 0:1])
+                # we will work with a box that is 10 by 10
+                self.quat_ax.set_ylim(0,10)
+                self.quat_ax.set_xlim(0,10)
+                # now set up the gridlines which will join all integer points on both axes
+
+        qp = QuantPlot(self)
+
+
     def _make_temp_df(self):
         # We should plot the daily averages rather then every point as readability suffers. We can then do
         # a seperate subplot that has a comparison of the daily variance
-        temperature_df = pd.DataFrame()
-        files = [f for f in os.listdir(self.hobo_dir) if '.csv' in f]
-        for f in files:
-            temp_df = pd.read_csv(os.path.join(self.hobo_dir, f), names=['ind', 'date', 'temp'])
-            temp_df.set_index('date', drop=True, inplace=True)
-            temp_df.drop(columns='ind', inplace=True)
-            temp_df = temp_df.dropna()
-            temperature_df[f.replace('.csv', '')] = temp_df['temp']
-        self.temperature_df = temperature_df.loc[:'7/23/17 00:00', :]
+        if os.path.exists(os.path.join(self.cache_dir, 'daily_temperature_av_df.p')):
+            self.daily_temperature_av_df = pickle.load(open(os.path.join(self.cache_dir, 'daily_temperature_av_df.p'), 'rb'))
+            self.daily_temperature_range_df = pickle.load(open(os.path.join(self.cache_dir, 'daily_temperature_range_df.p'), 'rb'))
+            self.temperature_df = pickle.load(open(os.path.join(self.cache_dir, 'temperature_df.p'), 'rb'))
+        else:
+            temperature_df = pd.DataFrame()
+            files = [f for f in os.listdir(self.hobo_dir) if '.csv' in f]
+            for f in files:
+                temp_df = pd.read_csv(os.path.join(self.hobo_dir, f), names=['ind', 'date', 'temp'])
+                temp_df.set_index('date', drop=True, inplace=True)
+                temp_df.drop(columns='ind', inplace=True)
+                temp_df = temp_df.dropna()
+                temperature_df[f.replace('.csv', '')] = temp_df['temp']
+            self.temperature_df = temperature_df.loc[:'7/23/17 00:00', :]
 
-        # now calculate the daily averages. Work from 00:00 to 23:00 for each bin
-        # at the same time we can calculate the daily range for each day
-        daily_average_temp_dict = {}
-        daily_range_temp_dict = {}
-        # a list for each of the hobo columns
-        daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
-        current_day = None
-        for time_ind in self.temperature_df.index.values.tolist():
-            if '00:00' in time_ind:
-                if daily_temperature_bin_lists and len(daily_temperature_bin_lists[0]) == 24: # must be a full set of data
-                    # then we should bank calculate what we have in the bin_list and populate a new item in the bin_dict
-                    average_values = [sum(bin_list)/len(bin_list) for bin_list in daily_temperature_bin_lists]
-                    daily_ranges = [max(bin_list)-min(bin_list) for bin_list in daily_temperature_bin_lists]
-                    daily_average_temp_dict[current_day] = average_values
-                    daily_range_temp_dict[current_day] = daily_ranges
-                    daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
+            # now calculate the daily averages. Work from 00:00 to 23:00 for each bin
+            # at the same time we can calculate the daily range for each day
+            daily_average_temp_dict = {}
+            daily_range_temp_dict = {}
+            # a list for each of the hobo columns
+            daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
+            current_day = None
+            for time_ind in self.temperature_df.index.values.tolist():
+                if '00:00' in time_ind:
+                    if daily_temperature_bin_lists and len(daily_temperature_bin_lists[0]) == 24: # must be a full set of data
+                        # then we should bank calculate what we have in the bin_list and populate a new item in the bin_dict
+                        average_values = [sum(bin_list)/len(bin_list) for bin_list in daily_temperature_bin_lists]
+                        daily_ranges = [max(bin_list)-min(bin_list) for bin_list in daily_temperature_bin_lists]
+                        daily_average_temp_dict[current_day] = average_values
+                        daily_range_temp_dict[current_day] = daily_ranges
+                        daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
+                        self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
+                    elif daily_temperature_bin_lists and len(daily_temperature_bin_lists[0]) != 24:
+                        # then we have a partial set of data and we don't want to calculate an average from this
+                        daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
+                        self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
+                else:
+                    # update the current day we are on and add the temp data to the bin_lists
+                    current_day = time_ind.split(' ')[0]
                     self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
-                elif daily_temperature_bin_lists and len(daily_temperature_bin_lists[0]) != 24:
-                    # then we have a partial set of data and we don't want to calculate an average from this
-                    daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
-                    self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
-            else:
-                # update the current day we are on and add the temp data to the bin_lists
-                current_day = time_ind.split(' ')[0]
-                self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
-        if len(daily_temperature_bin_lists[0]) == 24:
-            # then we have one last full set of data
-            average_values = [sum(bin_list) / len(bin_list) for bin_list in daily_temperature_bin_lists]
-            daily_average_temp_dict[current_day] = average_values
-            daily_range_temp_dict[current_day] = daily_ranges
-        self.daily_temperature_av_df = pd.DataFrame.from_dict(data=daily_average_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
-        self.daily_temperature_range_df = pd.DataFrame.from_dict(data=daily_range_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
+            if len(daily_temperature_bin_lists[0]) == 24:
+                # then we have one last full set of data
+                average_values = [sum(bin_list) / len(bin_list) for bin_list in daily_temperature_bin_lists]
+                daily_average_temp_dict[current_day] = average_values
+                daily_range_temp_dict[current_day] = daily_ranges
+            self.daily_temperature_av_df = pd.DataFrame.from_dict(data=daily_average_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
+            self.daily_temperature_range_df = pd.DataFrame.from_dict(data=daily_range_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
 
+            pickle.dump(self.daily_temperature_av_df, open(os.path.join(self.cache_dir, 'daily_temperature_av_df.p'), 'wb'))
+            pickle.dump(self.daily_temperature_range_df, open(os.path.join(self.cache_dir, 'daily_temperature_range_df.p'), 'wb'))
+            pickle.dump(self.temperature_df, open(os.path.join(self.cache_dir, 'temperature_df.p'), 'wb'))
 
-        # index_len = len(self.temperature_df.index.values.tolist())
-        # sample_ind = list(range(0,index_len, 2))
-        # # subsample to one in ten points
-        # self.temperature_df = self.temperature_df.iloc[sample_ind]
-        apples = 'asdf'
 
     def _populate_bin_list_for_single_time(self, bin_lists, time_ind):
         for i, temp_val in enumerate(self.temperature_df.loc[time_ind].values.tolist()):
@@ -372,7 +414,7 @@ class RestrepoAnalysis:
         # delete 'FS15SE8_FS15SE8_N705-S508' from the df
         for uid, name in self.smp_uid_to_name_dict.items():
             if name == 'FS15SE8_FS15SE8_N705-S508':
-                self.seq_df.drop(index=uid, inplace=True, errors='ignore')
+                self.post_med_seq_abundance_relative_df.drop(index=uid, inplace=True, errors='ignore')
                 self.profile_df.drop(index=uid, inplace=True, errors='ignore')
                 self.clade_prop_pcoa_coords.drop(index=uid, inplace=True, errors='ignore')
                 self.clade_proportion_df.drop(index=uid, inplace=True, errors='ignore')
@@ -468,7 +510,7 @@ class RestrepoAnalysis:
     def _set_clade_proportion_df_from_scratch(self, sample_uids):
         for sample_uid in sample_uids:
             print(f'Counting clade abundances for sample {sample_uid}')
-            sample_series = self.seq_df.loc[sample_uid]
+            sample_series = self.post_med_seq_abundance_relative_df.loc[sample_uid]
             clade_prop_dict = {'A': 0.0, 'C': 0.0, 'D': 0.0}
             for seq_name in sample_series.index.values.tolist():
                 if 'A' in seq_name:
@@ -495,11 +537,11 @@ class RestrepoAnalysis:
         self.clade_proportion_df_non_normalised = pickle.load(
             open(os.path.join(self.cache_dir, 'clade_proportion_df_non_norm.p'), 'rb'))
 
-    def _populate_seq_abund_df(self):
+    def _post_med_seq_abundance_relative_df(self):
         if os.path.exists(os.path.join(self.cache_dir, 'seq_df.p')):
             return pickle.load(open(os.path.join(self.cache_dir, 'seq_df.p'), 'rb'))
         else:
-            with open(self.seq_rel_abund_ouput_path, 'r') as f:
+            with open(self.seq_rel_abund_post_med_ouput_path, 'r') as f:
                 seq_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
 
             df = pd.DataFrame(seq_data)
@@ -517,7 +559,10 @@ class RestrepoAnalysis:
             return df
 
     def _init_metadata_info_df(self, meta_info_path):
-        """The matching of names between the SP output and the meta info that Alejandro was working from was causing us
+        """ This method produces a dataframe that has sample UID as key and
+        'species', 'reef', 'reef_type', 'depth' 'season' as columns.
+
+        The matching of names between the SP output and the meta info that Alejandro was working from was causing us
         some issues. There were 10 samples names in the meta info that were not matching up with the SP sample names.
 
         The following names were not finding matches or found 2 matches:
@@ -589,7 +634,7 @@ class RestrepoAnalysis:
             # delete 'FS15SE8_FS15SE8_N705-S508' from the df
             for uid, name in self.smp_uid_to_name_dict.items():
                 if name == 'FS15SE8_FS15SE8_N705-S508':
-                    self.seq_df.drop(index=uid, inplace=True)
+                    self.post_med_seq_abundance_relative_df.drop(index=uid, inplace=True)
                     self.profile_df.drop(index=uid, inplace=True)
                     if self.prof_df_cutoff is not None:
                         self.prof_df_cutoff.drop(index=uid, inplace=True)
@@ -1970,7 +2015,7 @@ class RestrepoAnalysis:
                     prof_uid_list.append(profile_uid)
                     sample_unit_list.append(f'{profile_uid}_{smp_uid}')
 
-            meta_info_df_for_clade = self.metadata_info_df.loc[meta_info_indices, :]
+            meta_info_df_for_clade = self.experimental_metadata_info_df.loc[meta_info_indices, :]
 
             output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_types_{clade}.csv')
             output_pickle_dist_matrix = os.path.join(self.cache_dir, f'dists_permanova_types_{clade}.p')
@@ -1997,7 +2042,7 @@ class RestrepoAnalysis:
         apples = 'pies'
 
     def permute_sample_permanova(self):
-        meta_df = self.metadata_info_df
+        meta_df = self.experimental_metadata_info_df
         for clade in self.clades:
             clade_sample_dist_df = self.sample_clade_dist_df_dict[clade]
             output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}.csv')
@@ -2194,6 +2239,10 @@ class MetaInfoPlotter:
             return y0_list, x0_list, heights_list, width_list,
 
 
+
+
+
+
 if __name__ == "__main__":
     rest_analysis = RestrepoAnalysis(
         base_input_dir = os.path.join(
@@ -2234,8 +2283,9 @@ if __name__ == "__main__":
         cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis',
         hobo_dir = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/HOBO/hobo_csv')
     # rest_analysis.make_dendrogram_with_meta_all_clades()
-    # rest_analysis.plot_pcoa_of_cladal()
-    rest_analysis._plot_temperature()
+    rest_analysis.plot_pcoa_of_cladal()
+    # rest_analysis._plot_temperature()
+    # rest_analysis._quaternary_plot()
     foo = 'asdf'
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_sample_permanova()
