@@ -194,14 +194,17 @@ class RestrepoAnalysis:
     def _populate_seq_meta_data_df(self):
         """This method will produce a dataframe that has sample UID as the key and the QC metadata items as the
         columns"""
-        df = pd.read_csv(filepath_or_buffer=self.seq_abs_abund_ouput_path, sep='\t', header=0)
-        columns = ['sample_uid'] + df.columns.values.tolist()[1:]
-        df.columns = columns
-        df = df.iloc[:-5,:]
-        df['sample_uid'] = pd.to_numeric(df['sample_uid'])
-        df.set_index('sample_uid', drop=True, inplace=True)
-
-        return df
+        if os.path.exists((os.path.join(self.cache_dir, 'seq_meta_data_df.p'))):
+            return pickle.load(open(os.path.join(self.cache_dir, 'seq_meta_data_df.p'), 'rb'))
+        else:
+            df = pd.read_csv(filepath_or_buffer=self.seq_abs_abund_ouput_path, sep='\t', header=0)
+            columns = ['sample_uid'] + df.columns.values.tolist()[1:]
+            df.columns = columns
+            df = df.iloc[:-5,:]
+            df['sample_uid'] = pd.to_numeric(df['sample_uid'])
+            df.set_index('sample_uid', drop=True, inplace=True)
+            pickle.dump(df, open(os.path.join(self.cache_dir, 'seq_meta_data_df.p'), 'wb'))
+            return df
 
     def _quaternary_plot(self):
         class QuantPlot:
@@ -2066,7 +2069,9 @@ class RestrepoAnalysis:
             this = skbio.stats.distance.permdisp(distance_matrix=dist_obj, grouping=meta_info_df_for_clade['season'])
             apples = 'asdf'
 
-
+    def output_seq_analysis_overview_outputs(self):
+        sum_of_contigs = sum(self.seq_meta_data_df['num_contgs'])
+        print(f'In total, {sum_of_contigs} contigs were produced.')
 
         apples = 'asdf'
 
@@ -2286,6 +2291,8 @@ if __name__ == "__main__":
             '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
         cutoff_abund=0.06, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis',
         hobo_dir = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/HOBO/hobo_csv')
+    rest_analysis.output_seq_analysis_overview_outputs()
+
     # rest_analysis.make_dendrogram_with_meta_all_clades()
     rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis._plot_temperature()
