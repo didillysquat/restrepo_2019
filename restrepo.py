@@ -194,11 +194,14 @@ class RestrepoAnalysis:
     def _populate_seq_meta_data_df(self):
         """This method will produce a dataframe that has sample UID as the key and the QC metadata items as the
         columns"""
-        with open(self.seq_abs_abund_ouput_path, 'r') as f:
-            seq_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
+        df = pd.read_csv(filepath_or_buffer=self.seq_abs_abund_ouput_path, sep='\t', header=0)
+        columns = ['sample_uid'] + df.columns.values.tolist()[1:]
+        df.columns = columns
+        df = df.iloc[:-5,:]
+        df['sample_uid'] = pd.to_numeric(df['sample_uid'])
+        df.set_index('sample_uid', drop=True, inplace=True)
 
-        df = pd.DataFrame(seq_data)
-        foo = 'bar'
+        return df
 
     def _quaternary_plot(self):
         class QuantPlot:
@@ -419,6 +422,7 @@ class RestrepoAnalysis:
                 self.clade_prop_pcoa_coords.drop(index=uid, inplace=True, errors='ignore')
                 self.clade_proportion_df.drop(index=uid, inplace=True, errors='ignore')
                 self.clade_proportion_df_non_normalised.drop(index=uid, inplace=True, errors='ignore')
+                self.seq_meta_data_df.drop(index=uid, inplace=True, errors='ignore')
                 if self.prof_df_cutoff is not None:
                     self.prof_df_cutoff.drop(index=uid, inplace=True, errors='ignore')
                 if self.sample_clade_dist_df_dict:
