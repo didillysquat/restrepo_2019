@@ -137,6 +137,7 @@ class RestrepoAnalysis:
         self.sample_clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict(smp_dist=True)
         self.profile_df  = None
+        self.profile_meta_info_df = None
         self._populate_profile_df()
         self.type_uid_to_name_dict = {}
         if cutoff_abund is not None:
@@ -770,9 +771,20 @@ class RestrepoAnalysis:
             self.prof_uid_to_global_abund_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_global_abund_dict.p'), 'rb'))
             self.prof_uid_to_name_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_name_dict.p'), 'rb'))
             self.prof_name_to_uid_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_name_to_uid_dict.p'), 'rb'))
+            self.profile_meta_info_df = pickle.load(open(os.path.join(self.cache_dir, 'profile_meta_info_df.p'), 'rb'))
         else:
             # read in df
             df = pd.read_csv(filepath_or_buffer=self.profile_rel_abund_ouput_path, sep='\t', header=None)
+
+
+            profile_meta_info_df = df.iloc[:7, :].T
+            profile_meta_info_df = profile_meta_info_df.drop(index=1)
+            profile_meta_info_df.iat[0,0] = 'profile_uid'
+            profile_meta_info_df.columns = profile_meta_info_df.iloc[0]
+            profile_meta_info_df = profile_meta_info_df.iloc[1:,:]
+            profile_meta_info_df.set_index('profile_uid', drop=True, inplace=True)
+            self.profile_meta_info_df = profile_meta_info_df
+
             # collect sample uid to name info
             index_list = df.index.values.tolist()
             for i in range(len(index_list)):
@@ -823,6 +835,7 @@ class RestrepoAnalysis:
             pickle.dump(self.prof_uid_to_global_abund_dict, open(os.path.join(self.cache_dir, 'prof_uid_to_global_abund_dict.p'), 'wb'))
             pickle.dump(self.prof_uid_to_name_dict, open(os.path.join(self.cache_dir, 'prof_uid_to_name_dict.p'), 'wb'))
             pickle.dump(self.prof_name_to_uid_dict, open(os.path.join(self.cache_dir, 'prof_name_to_uid_dict.p'), 'wb'))
+            pickle.dump(self.profile_meta_info_df, open(os.path.join(self.cache_dir, 'profile_meta_info_df.p'), 'wb'))
 
     def plot_pcoa_of_cladal(self):
         class PCOAByClade:
@@ -2046,7 +2059,6 @@ class RestrepoAnalysis:
             meta_info_df_for_clade.to_csv(
                 path_or_buf=output_path_meta_info, sep=',', header=True, index=False, line_terminator='\n')
 
-        apples = 'pies'
 
     def permute_sample_permanova(self):
         meta_df = self.experimental_metadata_info_df
@@ -2070,9 +2082,19 @@ class RestrepoAnalysis:
             apples = 'asdf'
 
     def output_seq_analysis_overview_outputs(self):
-        sum_of_contigs = sum(self.seq_meta_data_df['num_contgs'])
-        print(f'In total, {sum_of_contigs} contigs were produced.')
+        sum_of_contigs = sum(self.seq_meta_data_df['raw_contigs'])
+        num_samples = len(self.seq_meta_data_df.index.values.tolist())
+        average_num_symbiodinium_seqs_absolute_post_qc_before_med = int(sum(self.seq_meta_data_df['post_taxa_id_absolute_symbiodinium_seqs'])/num_samples)
+        average_num_symbiodinium_seqs_uniue_post_qc_before_med = int(sum(self.seq_meta_data_df['post_taxa_id_unique_symbiodinium_seqs'])/num_samples)
+        average_num_symbiodinium_seqs_absolute_post_med = int(sum(self.seq_meta_data_df['post_med_absolute']) / num_samples)
+        average_num_symbiodinium_seqs_unique_post_med = int(sum(self.seq_meta_data_df['post_med_unique']) / num_samples)
 
+        print(f'In total, {sum_of_contigs} contigs were produced from {num_samples} samples.')
+        print(f'This translates to an average read depth of {sum_of_contigs/num_samples}.')
+        print(f'Before undergoing minimum entropy decomposition, an average of {average_num_symbiodinium_seqs_absolute_post_qc_before_med} Symbiodiniaceae sequences were returned per sample representing, on average, {average_num_symbiodinium_seqs_uniue_post_qc_before_med} distinct sequences per sample.')
+        print(f'After MED, these values were {average_num_symbiodinium_seqs_absolute_post_med} and {average_num_symbiodinium_seqs_unique_post_med}, respectively.')
+
+        total_number_of_type_profiles
         apples = 'asdf'
 
 class MetaInfoPlotter:
