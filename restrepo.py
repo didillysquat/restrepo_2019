@@ -153,6 +153,7 @@ class RestrepoAnalysis:
         # this one is the actual proportions (i.e. 0.03, 0.97, 0.00)
         self.clade_proportion_df_non_normalised = pd.DataFrame(columns=list('ACD'),
                                                                index=self.post_med_seq_abundance_relative_df.index.values.tolist())
+        self.between_sample_clade_proportion_distances_df = None
         self.clade_prop_pcoa_coords = None
         self._create_clade_prop_distances()
 
@@ -470,12 +471,14 @@ class RestrepoAnalysis:
     def _create_clade_prop_distances(self):
         """Go through the self.parent.seq_df and get the proportion of A, C and D sequences
         for each sample and populate this into the self.clade_proportion_df."""
-        if os.path.exists(os.path.join(self.cache_dir, 'clade_prop_pcoa_coords.p')):
+        if os.path.exists(os.path.join(self.cache_dir, 'betweeen_sample_clade_proportion_distances.p')):
             self.clade_prop_pcoa_coords = pickle.load(open(os.path.join(self.cache_dir, 'clade_prop_pcoa_coords.p'), 'rb'))
             self.clade_proportion_df = pickle.load(
                 open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'rb'))
             self.clade_proportion_df_non_normalised = pickle.load(
                 open(os.path.join(self.cache_dir, 'clade_proportion_df_non_norm.p'), 'rb'))
+            self.between_sample_clade_proportion_distances_df = pickle.load(
+                open(os.path.join(self.cache_dir, 'betweeen_sample_clade_proportion_distances.p'), 'rb'))
         else:
             sample_uids = self.clade_proportion_df.index.values.tolist()
             if self._if_clade_proportion_df_cache_exists():
@@ -487,7 +490,7 @@ class RestrepoAnalysis:
             if self._if_clade_proportion_distance_dict_chache_exists():
                 clade_prop_distance_dict = self._set_clade_proportion_distance_dict_from_chache()
             else:
-                clade_prop_distance_dict = self._set_clade_make_clade_proportion_distance_dict_from_scratch(sample_uids)
+                clade_prop_distance_dict = self._make_clade_proportion_distance_dict_from_scratch(sample_uids)
 
             dist_file_as_list = self._make_clade_prop_distance_matrix_2dlist(clade_prop_distance_dict, sample_uids)
 
@@ -518,9 +521,16 @@ class RestrepoAnalysis:
                     temp_at_string.append(
                         clade_prop_distance_dict[frozenset({uid_outer, uid_inner})])
             dist_file_as_list.append(temp_at_string)
+        self.between_sample_clade_proportion_distances_df = pd.DataFrame(dist_file_as_list, columns=sample_uids, index=sample_uids)
+        # output the dataframe so that it can be used for PERMANOVA analysis
+        self.between_sample_clade_proportion_distances_df.to_csv(path_or_buf=os.path.join(self.outputs_dir, 'between_sample_clade_proportion_distances.csv'), index=False, header=False)
+        # also output a corresponding meta info df
+        temp_meta_df = self.experimental_metadata_info_df.loc[sample_uids,]
+        temp_meta_df.to_csv(path_or_buf=os.path.join(self.outputs_dir, 'sample_meta_for_clade_proportion_permanova.csv'), index=False, header=True)
+        pickle.dump(self.between_sample_clade_proportion_distances_df, open(os.path.join(self.cache_dir, 'betweeen_sample_clade_proportion_distances.p'), 'wb'))
         return dist_file_as_list
 
-    def _set_clade_make_clade_proportion_distance_dict_from_scratch(self, sample_uids):
+    def _make_clade_proportion_distance_dict_from_scratch(self, sample_uids):
         clade_prop_distance_dict = {}
         tot = len(sample_uids) * len(sample_uids)
         count = 0
