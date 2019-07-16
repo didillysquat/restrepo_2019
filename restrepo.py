@@ -78,48 +78,16 @@ class RestrepoAnalysis:
         self.base_input_dir = base_input_dir
         self.ignore_cache=ignore_cache
         self.gis_input_base_path = gis_path
-        # Paths to raw info files
-        self.profile_rel_abund_ouput_path = os.path.join(self.base_input_dir, profile_rel_abund_ouput_path)
-        self.profile_abs_abund_ouput_path = os.path.join(self.base_input_dir, profile_abs_abund_ouput_path)
-        self.seq_rel_abund_post_med_ouput_path = os.path.join(self.base_input_dir, seq_rel_abund_ouput_path)
-        self.seq_abs_abund_ouput_path = os.path.join(self.base_input_dir, seq_abs_abund_ouput_path)
-        self.hobo_dir = hobo_dir
-        # Paths to the standard output profile distance files
-        self.between_profile_clade_dist_path_dict = {
-            'A' : os.path.join(self.base_input_dir, clade_A_profile_dist_path),
-            'C' : os.path.join(self.base_input_dir, clade_C_profile_dist_path),
-            'D' : os.path.join(self.base_input_dir, clade_D_profile_dist_path)}
 
-        # Paths to the cct specific distances
-        self.between_profile_clade_dist_cct_specific_path_dict = {
-            'A': os.path.join(self.base_input_dir, clade_A__profile_dist_cct_specific_path),
-            'C': os.path.join(self.base_input_dir, clade_C_profile_dist_cct_specific_path),
-            'D': os.path.join(self.base_input_dir, clade_D__profile_dist_cct_specific_path)
-        }
+        self._init_paths_to_input_files(clade_A__profile_dist_cct_specific_path, clade_A_profile_dist_path,
+                                        clade_A_smpl_dist_path, clade_C_profile_dist_cct_specific_path,
+                                        clade_C_profile_dist_path, clade_C_smpl_dist_path,
+                                        clade_D__profile_dist_cct_specific_path, clade_D_profile_dist_path,
+                                        clade_D_smpl_dist_path, hobo_dir, profile_abs_abund_ouput_path,
+                                        profile_rel_abund_ouput_path, seq_abs_abund_ouput_path,
+                                        seq_rel_abund_ouput_path)
 
-        # Paths to the smpl distance (bray curtis sqrt transformed abundance)
-        self.between_sample_clade_dist_path_dict = {
-            'A': os.path.join(self.base_input_dir, clade_A_smpl_dist_path),
-            'C': os.path.join(self.base_input_dir, clade_C_smpl_dist_path),
-            'D': os.path.join(self.base_input_dir, clade_D_smpl_dist_path)
-        }
-
-        # figures paths
-        self.figure_dir = os.path.join(self.cwd, 'figures')
-        os.makedirs(self.figure_dir, exist_ok=True)
-
-        # output paths
-        self.outputs_dir = os.path.join(self.cwd, 'outputs')
-        os.makedirs(self.outputs_dir, exist_ok=True)
-        self.uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, 'dss_at_uid_tups.tsv')
-
-
-        # cache implementation
-        self.cache_dir = os.path.join(self.cwd, 'cache')
-        os.makedirs(self.cache_dir, exist_ok=True)
-        self.profile_clade_dist_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_df_dict.p')
-        self.profile_clade_dist_cct_specific_dict_p_path = os.path.join(self.cache_dir, 'clade_dist_cct_specific_dict.p')
-        self.sample_clade_dist_dict_p_path = os.path.join(self.cache_dir, 'sample_clade_dist_df_dict.p')
+        self._init_working_directories()
 
         # Info containers
         self.smp_uid_to_name_dict = None
@@ -205,6 +173,48 @@ class RestrepoAnalysis:
         self.seasons = ['Winter', 'Summer']
 
         self._del_propblem_sample()
+
+    def _init_working_directories(self):
+        # figures paths
+        self.figure_dir = os.path.join(self.cwd, 'figures')
+        os.makedirs(self.figure_dir, exist_ok=True)
+        # output paths
+        self.outputs_dir = os.path.join(self.cwd, 'outputs')
+        os.makedirs(self.outputs_dir, exist_ok=True)
+        self.uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, 'dss_at_uid_tups.tsv')
+        # cache implementation
+        self.cache_dir = os.path.join(self.cwd, 'cache')
+        os.makedirs(self.cache_dir, exist_ok=True)
+
+    def _init_paths_to_input_files(self, clade_A__profile_dist_cct_specific_path, clade_A_profile_dist_path,
+                                   clade_A_smpl_dist_path, clade_C_profile_dist_cct_specific_path,
+                                   clade_C_profile_dist_path, clade_C_smpl_dist_path,
+                                   clade_D__profile_dist_cct_specific_path, clade_D_profile_dist_path,
+                                   clade_D_smpl_dist_path, hobo_dir, profile_abs_abund_ouput_path,
+                                   profile_rel_abund_ouput_path, seq_abs_abund_ouput_path, seq_rel_abund_ouput_path):
+        # Paths to raw info files
+        self.profile_rel_abund_ouput_path = os.path.join(self.base_input_dir, profile_rel_abund_ouput_path)
+        self.profile_abs_abund_ouput_path = os.path.join(self.base_input_dir, profile_abs_abund_ouput_path)
+        self.seq_rel_abund_post_med_ouput_path = os.path.join(self.base_input_dir, seq_rel_abund_ouput_path)
+        self.seq_abs_abund_ouput_path = os.path.join(self.base_input_dir, seq_abs_abund_ouput_path)
+        self.hobo_dir = hobo_dir
+        # Paths to the standard output profile distance files
+        self.between_profile_clade_dist_path_dict = {
+            'A': os.path.join(self.base_input_dir, clade_A_profile_dist_path),
+            'C': os.path.join(self.base_input_dir, clade_C_profile_dist_path),
+            'D': os.path.join(self.base_input_dir, clade_D_profile_dist_path)}
+        # Paths to the cct specific distances
+        self.between_profile_clade_dist_cct_specific_path_dict = {
+            'A': os.path.join(self.base_input_dir, clade_A__profile_dist_cct_specific_path),
+            'C': os.path.join(self.base_input_dir, clade_C_profile_dist_cct_specific_path),
+            'D': os.path.join(self.base_input_dir, clade_D__profile_dist_cct_specific_path)
+        }
+        # Paths to the smpl distance (bray curtis sqrt transformed abundance)
+        self.between_sample_clade_dist_path_dict = {
+            'A': os.path.join(self.base_input_dir, clade_A_smpl_dist_path),
+            'C': os.path.join(self.base_input_dir, clade_C_smpl_dist_path),
+            'D': os.path.join(self.base_input_dir, clade_D_smpl_dist_path)
+        }
 
     def _populate_seq_meta_data_df(self):
         """This method will produce a dataframe that has sample UID as the key and the QC metadata items as the
@@ -727,12 +737,12 @@ class RestrepoAnalysis:
         try:
             if smp_dist:
                 self.between_sample_clade_dist_df_dict = pickle.load(
-                    file=open(self.sample_clade_dist_dict_p_path, 'rb'))
+                    file=open(os.path.join(self.cache_dir, 'sample_clade_dist_df_dict.p'), 'rb'))
             elif cct_specific:
                 self.between_profile_clade_dist_cct_specific_df_dict = pickle.load(
-                    file=open(self.profile_clade_dist_cct_specific_dict_p_path, 'rb'))
+                    file=open(os.path.join(self.cache_dir, 'clade_dist_cct_specific_dict.p'), 'rb'))
             else:
-                self.between_profile_clade_dist_df_dict = pickle.load(file=open(self.profile_clade_dist_dict_p_path, 'rb'))
+                self.between_profile_clade_dist_df_dict = pickle.load(file=open(os.path.join(self.cache_dir, 'clade_dist_df_dict.p'), 'rb'))
         except FileNotFoundError:
             self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific, smp_dist)
 
@@ -769,12 +779,12 @@ class RestrepoAnalysis:
 
         if smp_dist:
             pickle.dump(obj=self.between_sample_clade_dist_df_dict,
-                        file=open(self.sample_clade_dist_dict_p_path, 'wb'))
+                        file=open(os.path.join(self.cache_dir, 'sample_clade_dist_df_dict.p'), 'wb'))
         elif cct_specific:
             pickle.dump(obj=self.between_profile_clade_dist_cct_specific_df_dict,
-                        file=open(self.profile_clade_dist_cct_specific_dict_p_path, 'wb'))
+                        file=open(os.path.join(self.cache_dir, 'clade_dist_cct_specific_dict.p'), 'wb'))
         else:
-            pickle.dump(obj=self.between_profile_clade_dist_df_dict, file=open(self.profile_clade_dist_dict_p_path, 'wb'))
+            pickle.dump(obj=self.between_profile_clade_dist_df_dict, file=open(os.path.join(self.cache_dir, 'clade_dist_df_dict.p'), 'wb'))
 
     def _populate_profile_df(self):
         if os.path.exists(os.path.join(self.cache_dir, 'profile_df.p')):
