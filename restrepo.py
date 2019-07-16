@@ -85,20 +85,20 @@ class RestrepoAnalysis:
         self.seq_abs_abund_ouput_path = os.path.join(self.base_input_dir, seq_abs_abund_ouput_path)
         self.hobo_dir = hobo_dir
         # Paths to the standard output profile distance files
-        self.profile_clade_dist_path_dict = {
+        self.between_profile_clade_dist_path_dict = {
             'A' : os.path.join(self.base_input_dir, clade_A_profile_dist_path),
             'C' : os.path.join(self.base_input_dir, clade_C_profile_dist_path),
             'D' : os.path.join(self.base_input_dir, clade_D_profile_dist_path)}
 
         # Paths to the cct specific distances
-        self.profile_clade_dist_cct_specific_path_dict = {
+        self.between_profile_clade_dist_cct_specific_path_dict = {
             'A': os.path.join(self.base_input_dir, clade_A__profile_dist_cct_specific_path),
             'C': os.path.join(self.base_input_dir, clade_C_profile_dist_cct_specific_path),
             'D': os.path.join(self.base_input_dir, clade_D__profile_dist_cct_specific_path)
         }
 
         # Paths to the smpl distance (bray curtis sqrt transformed abundance)
-        self.sample_clade_dist_path_dict = {
+        self.between_sample_clade_dist_path_dict = {
             'A': os.path.join(self.base_input_dir, clade_A_smpl_dist_path),
             'C': os.path.join(self.base_input_dir, clade_C_smpl_dist_path),
             'D': os.path.join(self.base_input_dir, clade_D_smpl_dist_path)
@@ -129,18 +129,29 @@ class RestrepoAnalysis:
         self.prof_uid_to_global_abund_dict = None
         self.prof_uid_to_name_dict = None
         self.prof_name_to_uid_dict = None
-        self.profile_clade_dist_df_dict = {}
+
+        # Between profile distances dataframe holder dict before 0.05 cutoff
+        self.between_profile_clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict()
-        self.profile_clade_dist_cct_specific_df_dict = {}
-        if self.profile_clade_dist_cct_specific_path_dict['A']:
+
+        # Between profile distances dataframe holder dict after 0.05 cutoff
+        if self.between_profile_clade_dist_cct_specific_path_dict['A']:
+            self.between_profile_clade_dist_cct_specific_df_dict = {}
             # if we have the cct_speicifc distances
             self._populate_clade_dist_df_dict(cct_specific=True)
-        self.sample_clade_dist_df_dict = {}
+
+        # Between sample distances dataframe
+        self.between_sample_clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict(smp_dist=True)
+
+        # ITS2 type profile abundance dataframe before 0.05 cutoff
         self.profile_df  = None
+        # ITS2 type profile meta info dataframe
         self.profile_meta_info_df = None
         self._populate_profile_df()
+
         self.type_uid_to_name_dict = {}
+        # ITS2 type profile abundance dataframe after 0.05 cutoff
         if cutoff_abund is not None:
             self.cutoff_abund = cutoff_abund
             self.prof_df_cutoff = None
@@ -149,23 +160,25 @@ class RestrepoAnalysis:
             self.cutoff_abund = cutoff_abund
             self.prof_df_cutoff = None
 
-
-        # temperature df
+        # Temperature dataframe
         self.temperature_df = None
         self.daily_temperature_av_df = None
         self.daily_temperature_range_df = None
         self._make_temp_df()
 
+        # ITS2 sequence abundance (post-MED) dataframe
         self.post_med_seq_abundance_relative_df = self._post_med_seq_abundance_relative_df()
+
+        # ITS2 sequence abundance meta info for sequencing (QC steps)
         self.seq_meta_data_df = self._populate_seq_meta_data_df()
 
-        # metadata_info_df
+        # Sample meta info, reef, species etc.
         if meta_data_input_path is not None:
             self.experimental_metadata_info_df = self._init_metadata_info_df(meta_data_input_path)
         else:
             self.experimental_metadata_info_df = None
 
-        # clade proportion dfs (must be made after meta_data)
+        # Clade proportion dataframes (must be made after meta_data)
         # this df actually has the proportions normalised to 100 000 sequences
         self.clade_proportion_df = pd.DataFrame(columns=list('ACD'),
                                                 index=self.post_med_seq_abundance_relative_df.index.values.tolist())
@@ -430,11 +443,11 @@ class RestrepoAnalysis:
                 self.seq_meta_data_df.drop(index=uid, inplace=True, errors='ignore')
                 if self.prof_df_cutoff is not None:
                     self.prof_df_cutoff.drop(index=uid, inplace=True, errors='ignore')
-                if self.sample_clade_dist_df_dict:
+                if self.between_sample_clade_dist_df_dict:
                     for clade in self.clades:
-                        if uid in self.sample_clade_dist_df_dict[clade].index.values.tolist():
-                            self.sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True, errors='ignore')
-                            self.sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True, errors='ignore')
+                        if uid in self.between_sample_clade_dist_df_dict[clade].index.values.tolist():
+                            self.between_sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True, errors='ignore')
+                            self.between_sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True, errors='ignore')
 
                 break
 
@@ -647,11 +660,11 @@ class RestrepoAnalysis:
                     self.profile_df.drop(index=uid, inplace=True)
                     if self.prof_df_cutoff is not None:
                         self.prof_df_cutoff.drop(index=uid, inplace=True)
-                    if self.sample_clade_dist_df_dict:
+                    if self.between_sample_clade_dist_df_dict:
                         for clade in self.clades:
-                            if uid in self.sample_clade_dist_df_dict[clade].index.values.tolist():
-                                self.sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True)
-                                self.sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True)
+                            if uid in self.between_sample_clade_dist_df_dict[clade].index.values.tolist():
+                                self.between_sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True)
+                                self.between_sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True)
 
                     break
 
@@ -713,26 +726,26 @@ class RestrepoAnalysis:
     def pop_clade_dist_df_dict_from_cache_or_make_new(self, cct_specific, smp_dist):
         try:
             if smp_dist:
-                self.sample_clade_dist_df_dict = pickle.load(
+                self.between_sample_clade_dist_df_dict = pickle.load(
                     file=open(self.sample_clade_dist_dict_p_path, 'rb'))
             elif cct_specific:
-                self.profile_clade_dist_cct_specific_df_dict = pickle.load(
+                self.between_profile_clade_dist_cct_specific_df_dict = pickle.load(
                     file=open(self.profile_clade_dist_cct_specific_dict_p_path, 'rb'))
             else:
-                self.profile_clade_dist_df_dict = pickle.load(file=open(self.profile_clade_dist_dict_p_path, 'rb'))
+                self.between_profile_clade_dist_df_dict = pickle.load(file=open(self.profile_clade_dist_dict_p_path, 'rb'))
         except FileNotFoundError:
             self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific, smp_dist)
 
     def _pop_clade_dict_df_dict_from_scratch_and_pickle_out(self, cct_specific, smp_dist):
-        self._pop_clade_dist_df_dict_from_scrath(cct_specific, smp_dist)
+        self._pop_clade_dist_df_dict_from_scratch(cct_specific, smp_dist)
 
-    def _pop_clade_dist_df_dict_from_scrath(self, cct_specific, smp_dist):
+    def _pop_clade_dist_df_dict_from_scratch(self, cct_specific, smp_dist):
         if smp_dist:
-            path_dict_to_use = self.sample_clade_dist_path_dict
+            path_dict_to_use = self.between_sample_clade_dist_path_dict
         elif cct_specific:
-            path_dict_to_use = self.profile_clade_dist_cct_specific_path_dict
+            path_dict_to_use = self.between_profile_clade_dist_cct_specific_path_dict
         else:
-            path_dict_to_use = self.profile_clade_dist_path_dict
+            path_dict_to_use = self.between_profile_clade_dist_path_dict
         for clade in self.clades:
             with open(path_dict_to_use[clade], 'r') as f:
                 clade_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f][1:]]
@@ -748,20 +761,20 @@ class RestrepoAnalysis:
             df.columns = df.index.values.tolist()
 
             if smp_dist:
-                self.sample_clade_dist_df_dict[clade] = df.astype(dtype='float')
+                self.between_sample_clade_dist_df_dict[clade] = df.astype(dtype='float')
             elif cct_specific:
-                self.profile_clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
+                self.between_profile_clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
             else:
-                self.profile_clade_dist_df_dict[clade] = df.astype(dtype='float')
+                self.between_profile_clade_dist_df_dict[clade] = df.astype(dtype='float')
 
         if smp_dist:
-            pickle.dump(obj=self.sample_clade_dist_df_dict,
+            pickle.dump(obj=self.between_sample_clade_dist_df_dict,
                         file=open(self.sample_clade_dist_dict_p_path, 'wb'))
         elif cct_specific:
-            pickle.dump(obj=self.profile_clade_dist_cct_specific_df_dict,
+            pickle.dump(obj=self.between_profile_clade_dist_cct_specific_df_dict,
                         file=open(self.profile_clade_dist_cct_specific_dict_p_path, 'wb'))
         else:
-            pickle.dump(obj=self.profile_clade_dist_df_dict, file=open(self.profile_clade_dist_dict_p_path, 'wb'))
+            pickle.dump(obj=self.between_profile_clade_dist_df_dict, file=open(self.profile_clade_dist_dict_p_path, 'wb'))
 
     def _populate_profile_df(self):
         if os.path.exists(os.path.join(self.cache_dir, 'profile_df.p')):
@@ -1478,7 +1491,7 @@ class RestrepoAnalysis:
         clade = self.clades[clade_index]
         # Plot the dendrogram in first axes
         dendro_info = self._make_dendrogram_figure(
-            clade=clade, ax=axarr[clade_index + 1][0], dist_df=self.profile_clade_dist_cct_specific_df_dict[clade],
+            clade=clade, ax=axarr[clade_index + 1][0], dist_df=self.between_profile_clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
         if clade_index == 0:
             axarr[clade_index + 1][0].set_yticks([0.0, 1.0])
@@ -1586,7 +1599,7 @@ class RestrepoAnalysis:
 
         # Plot the dendrogram in first axes
         dendro_info = self._make_dendrogram_figure(
-            clade=clade, ax=axarr[1][0], dist_df=self.profile_clade_dist_cct_specific_df_dict[clade],
+            clade=clade, ax=axarr[1][0], dist_df=self.between_profile_clade_dist_cct_specific_df_dict[clade],
             local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
         axarr[1][0].set_yticks([0.0, 1.0])
         self._remove_spines_from_dendro(axarr[1])
@@ -1810,12 +1823,12 @@ class RestrepoAnalysis:
 
                 # plot the non cutoff dendro first
                 self._make_dendrogram_figure(
-                    clade=clade, ax=axarr[0], dist_df=self.profile_clade_dist_df_dict[clade],
+                    clade=clade, ax=axarr[0], dist_df=self.between_profile_clade_dist_df_dict[clade],
                     local_abundance_dict = self.prof_uid_to_local_abund_dict)
 
                 # then the cct specific
                 self._make_dendrogram_figure(
-                    clade=clade, ax=axarr[1], dist_df=self.profile_clade_dist_cct_specific_df_dict[clade],
+                    clade=clade, ax=axarr[1], dist_df=self.between_profile_clade_dist_cct_specific_df_dict[clade],
                     local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff)
 
                 plt.tight_layout()
@@ -1827,7 +1840,7 @@ class RestrepoAnalysis:
             # draw a single dendrogram per clade
             for clade in self.clades:
                 fig, ax = plt.subplots(figsize=(8, 12))
-                self._make_dendrogram_figure(clade=clade, ax=ax, dist_df=self.profile_clade_dist_df_dict[clade],
+                self._make_dendrogram_figure(clade=clade, ax=ax, dist_df=self.between_profile_clade_dist_df_dict[clade],
                                              local_abundance_dict=self.prof_uid_to_local_abund_dict)
                 plt.tight_layout()
 
@@ -2022,7 +2035,7 @@ class RestrepoAnalysis:
 
 
         for clade in self.clades:  # we will do a PERMANOVA per clade
-            prof_dist_df = self.profile_clade_dist_cct_specific_df_dict[clade]
+            prof_dist_df = self.between_profile_clade_dist_cct_specific_df_dict[clade]
             profile_uid_to_sample_uid_list_dict = self._generate_profile_uid_to_sample_uid_list_dict(clade=clade)
             sample_unit_list = []
             # this list contains only the prof uid info from the above sample_unit_list, in int form for use
@@ -2065,7 +2078,7 @@ class RestrepoAnalysis:
     def permute_sample_permanova(self):
         meta_df = self.experimental_metadata_info_df
         for clade in self.clades:
-            clade_sample_dist_df = self.sample_clade_dist_df_dict[clade]
+            clade_sample_dist_df = self.between_sample_clade_dist_df_dict[clade]
             output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}.csv')
             clade_sample_dist_df.to_csv(path_or_buf=output_path_dist_matrix, sep=',', header=False, index=False, line_terminator='\n')
 
@@ -2412,10 +2425,6 @@ class MetaInfoPlotter:
                     heights_list.append(0)
             y0_list = [data_y0 for _ in range(num_categories)]
             return y0_list, x0_list, heights_list, width_list,
-
-
-
-
 
 
 if __name__ == "__main__":
