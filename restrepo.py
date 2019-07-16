@@ -60,6 +60,7 @@ import cartopy
 from scipy.spatial.distance import braycurtis
 import itertools
 from skbio.stats.ordination import pcoa
+import statistics
 
 
 class RestrepoAnalysis:
@@ -776,13 +777,14 @@ class RestrepoAnalysis:
             # read in df
             df = pd.read_csv(filepath_or_buffer=self.profile_rel_abund_ouput_path, sep='\t', header=None)
 
-
             profile_meta_info_df = df.iloc[:7, :].T
             profile_meta_info_df = profile_meta_info_df.drop(index=1)
             profile_meta_info_df.iat[0,0] = 'profile_uid'
             profile_meta_info_df.columns = profile_meta_info_df.iloc[0]
             profile_meta_info_df = profile_meta_info_df.iloc[1:,:]
+            profile_meta_info_df['profile_uid'] = pd.to_numeric(profile_meta_info_df['profile_uid'])
             profile_meta_info_df.set_index('profile_uid', drop=True, inplace=True)
+            profile_meta_info_df['ITS2 type abundance DB'] = pd.to_numeric(profile_meta_info_df['ITS2 type abundance DB'])
             self.profile_meta_info_df = profile_meta_info_df
 
             # collect sample uid to name info
@@ -2082,20 +2084,162 @@ class RestrepoAnalysis:
             apples = 'asdf'
 
     def output_seq_analysis_overview_outputs(self):
-        sum_of_contigs = sum(self.seq_meta_data_df['raw_contigs'])
-        num_samples = len(self.seq_meta_data_df.index.values.tolist())
-        average_num_symbiodinium_seqs_absolute_post_qc_before_med = int(sum(self.seq_meta_data_df['post_taxa_id_absolute_symbiodinium_seqs'])/num_samples)
-        average_num_symbiodinium_seqs_uniue_post_qc_before_med = int(sum(self.seq_meta_data_df['post_taxa_id_unique_symbiodinium_seqs'])/num_samples)
-        average_num_symbiodinium_seqs_absolute_post_med = int(sum(self.seq_meta_data_df['post_med_absolute']) / num_samples)
-        average_num_symbiodinium_seqs_unique_post_med = int(sum(self.seq_meta_data_df['post_med_unique']) / num_samples)
+        self._report_sequencing_overview()
 
+        self._report_predicted_profiles_overview()
+
+        self._report_on_eveness_of_profile_distributions_per_clade()
+
+        # TODO set up a very quick bar plot of this data
+        self._report_on_profile_abundances_per_sample()
+
+        self._report_on_within_sample_clade_profile_rank_and_abundance()
+
+        apples = 'asdf'
+
+    def _report_on_within_sample_clade_profile_rank_and_abundance(self):
+        # now interesting to find out what the average abundance of the profiles from the different clades were
+        # best to do this through averaging from the output df for the profiles.
+        # again we can do this on a type by type basis so that we can get an idea of spread within each of the clades
+        # TODO set up a bar plot of this data too.
+        # first we do this using the df that doesn't have the <0.05 abundance profile instances removed
+        print('\n\nusing the non-cutoff profile df')
+        self._claclulate_av_abundance_of_clade_profiles(df_to_calculate_from=self.profile_df)
+        # now we do it using the df that does have the 0.05 abundance profile instances removed
+        print('\n\nusing the cutoff profile df')
+        self._claclulate_av_abundance_of_clade_profiles(df_to_calculate_from=self.prof_df_cutoff)
+        self._calc_av_rank_of_clade_profile()
+
+    def _calc_av_rank_of_clade_profile(self):
+        # we can also ask the question of what the average rank of the type was. For example, on average, Cladocopium its2 type profile was the 1.4th most abundant profile
+        # we could also plot this as we can have an average value for each profile and average these in turn with a n value. the stdv will then
+        print('\n\n')
+        dd_dict_profile_av_rankings = defaultdict(list)
+        for profile_uid in list(self.profile_df):  # for every column/profile
+            # ignore the one profile that was only found in the problematic sample we had to remove
+            # profile uid 2989
+            if profile_uid == 2989:
+                continue
+            temp_rank_list = []
+            indexers_non_zero = list(self.profile_df[profile_uid].to_numpy().nonzero()[0])
+            # for each sample that the profile was found in
+            # work out what rank the type was
+            for i in indexers_non_zero:
+                # get the non_zero values
+                indexers_non_zero = list(self.profile_df.iloc[i,].to_numpy().nonzero()[0])
+                non_zero_series = self.profile_df.iloc[i, indexers_non_zero]
+                non_zero_series_ordered = non_zero_series.sort_values(ascending=False)
+                sorted_vals = non_zero_series_ordered.values.tolist()
+                # now see what rank the value in question is
+                value_of_profile_in_question = self.profile_df.iloc[i][profile_uid]
+                for i, val in enumerate(sorted_vals):
+                    if val == value_of_profile_in_question:
+                        temp_rank_list.append(i + 1)
+                        break
+            dd_dict_profile_av_rankings[self.profile_meta_info_df.loc[profile_uid]['Clade']].append(
+                sum(temp_rank_list) / len(temp_rank_list))
+        for clade in list('ACD'):
+            av_rank = sum(dd_dict_profile_av_rankings[clade]) / len(dd_dict_profile_av_rankings[clade])
+            std = statistics.pstdev(dd_dict_profile_av_rankings[clade])
+            print(
+                f'The average rank of a clade {clade} profile was {av_rank} with stdv of {std} from {len(dd_dict_profile_av_rankings[clade])} profiles.')
+
+    def _claclulate_av_abundance_of_clade_profiles(self, df_to_calculate_from):
+
+        dd_dict_profile_av_rel_abunds = defaultdict(list)
+        for profile_uid in list(self.df_to_calculate_from):  # for every column/profile
+            indexers_non_zero = list(self.df_to_calculate_from[profile_uid].to_numpy().nonzero()[0])
+            non_zero_series = self.df_to_calculate_from[profile_uid].iloc[indexers_non_zero]
+            dd_dict_profile_av_rel_abunds[self.profile_meta_info_df.loc[profile_uid]['Clade']].append(
+                non_zero_series.mean())
+        for clade in list('ACD'):
+            av_abund = sum(dd_dict_profile_av_rel_abunds[clade]) / len(dd_dict_profile_av_rel_abunds[clade])
+            std = statistics.pstdev(dd_dict_profile_av_rel_abunds[clade])
+            print(
+                f'The average abund of a clade {clade} profile was {av_abund} with stdv of {std} from {len(dd_dict_profile_av_rel_abunds[clade])} profiles.')
+
+    def _report_on_profile_abundances_per_sample(self):
+        # number of types harbored on average by sample
+        # then the average abundances of the 1st, 2nd 3rd etc most abundant ITS2 type profiles within each sample
+        number_of_profiles = []
+        for i in range(len(self.profile_df.index.values.tolist())):  # for each row of the df
+            indexers_non_zero = list(self.profile_df.iloc[i,].nonzero()[0])
+            non_zero_series = self.profile_df.iloc[i, indexers_non_zero]
+            non_zero_series_ordered = non_zero_series.sort_values(ascending=False)
+            number_of_profiles.append(non_zero_series_ordered.values.tolist())
+        # calculate the number of samples containing each number of profiles
+        print('\n\n')
+        dd_num_profiles = defaultdict(int)
+        for l in number_of_profiles:
+            dd_num_profiles[len(l)] += 1
+        for i in range(10):
+            if i in dd_num_profiles:
+                print(f'{dd_num_profiles[i]} samples contained {i} profiles')
+        av_number_of_profiles = sum([len(l) for l in number_of_profiles]) / len(number_of_profiles)
+        # dictionary that will hold the values of the abundances
+        dd_dict_profile_abunds = defaultdict(list)
+        for l in number_of_profiles:
+            for i, val in enumerate(l):
+                dd_dict_profile_abunds[i].append(val)
+        for i in range(10):
+            if i in dd_dict_profile_abunds:
+                av_abund = sum(dd_dict_profile_abunds[i]) / len(dd_dict_profile_abunds[i])
+                std = statistics.pstdev(dd_dict_profile_abunds[i])
+                print(
+                    f'Profile {i + 1} has an average abundance of {av_abund} and a stdv of {std} calculated from {len(dd_dict_profile_abunds[i])} samples.')
+
+    def _report_on_eveness_of_profile_distributions_per_clade(self):
+        for clade in self.clades:
+            self._calc_cummulative_abund_of_top_half_abund_profiles(clade=clade)
+
+    def _report_predicted_profiles_overview(self):
+        total_unique_number_of_type_profiles = len(self.profile_meta_info_df.index.tolist())
+        total_absolute_number_of_type_profiles = sum(self.profile_meta_info_df['ITS2 type abundance DB'])
+        print(f'Across all clades {total_absolute_number_of_type_profiles} ITS2 type profile instances were '
+              f'predicted representing {total_unique_number_of_type_profiles} different profiles')
+
+        # The profile cutoff df = self.prof_df_cutoff
+        number_of_types_from_df_pre_cutoff = len(self.profile_df.columns.values.tolist())  # 111
+        number_of_types_from_df_post_cutoff = len(self.prof_df_cutoff.columns.values.tolist())  # 92
+        # https://stackoverflow.com/questions/952914/how-to-make-a-flat-list-out-of-list-of-lists
+        number_of_instances_after_cutoff = [item for sublist in (self.profile_df >= 0.05).values.tolist() for item in
+                                            sublist].count(True)  # 811
+        print(f'Number of different profiles pre 0.05 cutoff: {number_of_types_from_df_pre_cutoff}')
+        print(f'Number of different profiles post 0.05 cutoff: {number_of_types_from_df_post_cutoff}')
+        print(f'Number of profile instances after 0.05 cutoff: {number_of_instances_after_cutoff}')
+
+    def _report_sequencing_overview(self):
+        # total number of sequences pre-QC
+        sum_of_contigs = sum(self.seq_meta_data_df['raw_contigs'])
+        # total number of successfully sequenced samples
+        num_samples = len(self.seq_meta_data_df.index.values.tolist())
+        # absolute and unique number of sequences after the SymPortal quality control but before MED
+        average_num_symbiodinium_seqs_absolute_post_qc_before_med = int(
+            sum(self.seq_meta_data_df['post_taxa_id_absolute_symbiodinium_seqs']) / num_samples)
+        average_num_symbiodinium_seqs_uniue_post_qc_before_med = int(
+            sum(self.seq_meta_data_df['post_taxa_id_unique_symbiodinium_seqs']) / num_samples)
+        # absolute and unique number of sequences after the SymPortal quality control and MED
+        average_num_symbiodinium_seqs_absolute_post_med = int(
+            sum(self.seq_meta_data_df['post_med_absolute']) / num_samples)
+        average_num_symbiodinium_seqs_unique_post_med = int(sum(self.seq_meta_data_df['post_med_unique']) / num_samples)
         print(f'In total, {sum_of_contigs} contigs were produced from {num_samples} samples.')
         print(f'This translates to an average read depth of {sum_of_contigs/num_samples}.')
-        print(f'Before undergoing minimum entropy decomposition, an average of {average_num_symbiodinium_seqs_absolute_post_qc_before_med} Symbiodiniaceae sequences were returned per sample representing, on average, {average_num_symbiodinium_seqs_uniue_post_qc_before_med} distinct sequences per sample.')
-        print(f'After MED, these values were {average_num_symbiodinium_seqs_absolute_post_med} and {average_num_symbiodinium_seqs_unique_post_med}, respectively.')
+        print(
+            f'Before undergoing minimum entropy decomposition, an average of {average_num_symbiodinium_seqs_absolute_post_qc_before_med} Symbiodiniaceae sequences were returned per sample representing, on average, {average_num_symbiodinium_seqs_uniue_post_qc_before_med} distinct sequences per sample.')
+        print(
+            f'After MED, these values were {average_num_symbiodinium_seqs_absolute_post_med} and {average_num_symbiodinium_seqs_unique_post_med}, respectively.')
 
-        total_number_of_type_profiles
-        apples = 'asdf'
+    def _calc_cummulative_abund_of_top_half_abund_profiles(self, clade):
+        df_clade_specific = self.profile_meta_info_df[self.profile_meta_info_df['Clade'] == clade]
+        sorted_df = df_clade_specific.sort_values(by='ITS2 type abundance DB', axis=0, ascending=False)
+        num_profiles = len(df_clade_specific.index.values.tolist())
+        print(f'{num_profiles} clade {clade} profiles were returned.')
+        sum_of_first_half_most_abundant_profiles = sum(
+            sorted_df.iloc[:int(num_profiles / 2), ]['ITS2 type abundance DB'])
+        total_num_profile_instances_for_clade = sum(sorted_df['ITS2 type abundance DB'])
+        percent_rep_by_most_abund_profiles = sum_of_first_half_most_abundant_profiles / total_num_profile_instances_for_clade
+        print(f'The 50% most abundant profiles represented {percent_rep_by_most_abund_profiles} of the {total_num_profile_instances_for_clade} total profile-sample occurences for this genus.')
+
 
 class MetaInfoPlotter:
     def __init__(self, parent_analysis, ordered_uid_list, meta_axarr, prof_uid_to_smpl_uid_list_dict, prof_uid_to_y_loc_dict, dend_ax, sub_cat_axarr, clade_index):
