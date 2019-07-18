@@ -462,6 +462,19 @@ class RestrepoAnalysis:
 
                 break
 
+    def _del_problem_sample_from_a_df(self, df=None, list_of_dfs=None):
+        if df is not None:
+            for uid, name in self.smp_uid_to_name_dict.items():
+                if name == 'FS15SE8_FS15SE8_N705-S508':
+                    df.drop(index=uid, inplace=True, errors='ignore')
+                    break
+        else:
+            for uid, name in self.smp_uid_to_name_dict.items():
+                if name == 'FS15SE8_FS15SE8_N705-S508':
+                    for df_ind_list in list_of_dfs:
+                        df_ind_list.drop(index=uid, inplace=True, errors='ignore')
+                    break
+
     def _if_clade_proportion_df_cache_exists(self):
         return os.path.exists(os.path.join(self.cache_dir, 'clade_proportion_df.p'))
 
@@ -483,6 +496,11 @@ class RestrepoAnalysis:
             sample_uids = self.clade_proportion_df.index.values.tolist()
             if self._if_clade_proportion_df_cache_exists():
                 self._set_clade_proportion_df_from_cache()
+                self.clade_proportion_df = pickle.load(
+                    open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'rb'))
+                self.clade_proportion_df_non_normalised = pickle.load(
+                    open(os.path.join(self.cache_dir, 'clade_proportion_df_non_norm.p'), 'rb'))
+                self._del_problem_sample_from_a_df(list_of_dfs = [self.clade_proportion_df, self.clade_proportion_df_non_normalised])
             else:
                 self._set_clade_proportion_df_from_scratch(sample_uids)
 
@@ -507,6 +525,7 @@ class RestrepoAnalysis:
         self.clade_prop_pcoa_coords.to_csv(
             os.path.join(self.outputs_dir, 'sample_clade_props_pcoa_coords.csv'),
             index=True, header=True, sep=',')
+        self._del_problem_sample_from_a_df(df=self.clade_prop_pcoa_coords)
         pickle.dump(self.clade_prop_pcoa_coords, open(os.path.join(self.cache_dir, 'clade_prop_pcoa_coords.p'), 'wb'))
 
     def _make_clade_prop_distance_matrix_2dlist(self, clade_prop_distance_dict, sample_uids):
@@ -522,10 +541,12 @@ class RestrepoAnalysis:
                         clade_prop_distance_dict[frozenset({uid_outer, uid_inner})])
             dist_file_as_list.append(temp_at_string)
         self.between_sample_clade_proportion_distances_df = pd.DataFrame(dist_file_as_list, columns=sample_uids, index=sample_uids)
+        self._del_problem_sample_from_a_df(df=self.between_sample_clade_proportion_distances_df)
         # output the dataframe so that it can be used for PERMANOVA analysis
         self.between_sample_clade_proportion_distances_df.to_csv(path_or_buf=os.path.join(self.outputs_dir, 'between_sample_clade_proportion_distances.csv'), index=False, header=False)
         # also output a corresponding meta info df
         temp_meta_df = self.experimental_metadata_info_df.loc[sample_uids,]
+        self._del_problem_sample_from_a_df(df=temp_meta_df)
         temp_meta_df.to_csv(path_or_buf=os.path.join(self.outputs_dir, 'sample_meta_for_clade_proportion_permanova.csv'), index=False, header=True)
         pickle.dump(self.between_sample_clade_proportion_distances_df, open(os.path.join(self.cache_dir, 'betweeen_sample_clade_proportion_distances.p'), 'wb'))
         return dist_file_as_list
@@ -568,6 +589,8 @@ class RestrepoAnalysis:
             self.clade_proportion_df.at[sample_uid, 'A'] = int(clade_prop_dict['A'] * 100000)
             self.clade_proportion_df.at[sample_uid, 'C'] = int(clade_prop_dict['C'] * 100000)
             self.clade_proportion_df.at[sample_uid, 'D'] = int(clade_prop_dict['D'] * 100000)
+        self._del_problem_sample_from_a_df(
+            list_of_dfs=[self.clade_proportion_df, self.clade_proportion_df_non_normalised])
         pickle.dump(self.clade_proportion_df,
                     open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'wb'))
         pickle.dump(self.clade_proportion_df_non_normalised,
