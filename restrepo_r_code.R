@@ -130,3 +130,10 @@ anova(mod_reef)
 permutest(mod_reef, pairwise=TRUE)
 plot(mod_reef, segments = FALSE, ellipse=TRUE)
 
+# CLADE PROPORTIONS PERMANOVA
+output_path = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/'
+setwd(output_path)
+dis_matrix = as.dist(data.matrix(read.table(file="between_sample_clade_proportion_distances.csv", header=FALSE, sep=',', stringsAsFactors = FALSE)))
+meta_info = read.table(file='sample_meta_for_clade_proportion_permanova.csv', header=TRUE, sep=',')
+adonis(formula = dis_matrix ~ species*reef*reef_type*depth*season, data=meta_info)
+
