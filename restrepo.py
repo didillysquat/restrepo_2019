@@ -484,7 +484,7 @@ class RestrepoAnalysis:
     def _create_clade_prop_distances(self):
         """Go through the self.parent.seq_df and get the proportion of A, C and D sequences
         for each sample and populate this into the self.clade_proportion_df."""
-        if os.path.exists(os.path.join(self.cache_dir, 'betweeen_sample_clade_proportion_distances.p')):
+        if os.path.exists(os.path.join(self.cache_dir, 'betweeen_samplTe_clade_proportion_distances.p')):
             self.clade_prop_pcoa_coords = pickle.load(open(os.path.join(self.cache_dir, 'clade_prop_pcoa_coords.p'), 'rb'))
             self.clade_proportion_df = pickle.load(
                 open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'rb'))
@@ -492,7 +492,11 @@ class RestrepoAnalysis:
                 open(os.path.join(self.cache_dir, 'clade_proportion_df_non_norm.p'), 'rb'))
             self.between_sample_clade_proportion_distances_df = pickle.load(
                 open(os.path.join(self.cache_dir, 'betweeen_sample_clade_proportion_distances.p'), 'rb'))
+
+            self._report_clade_abund_proportions()
+
         else:
+            self._del_problem_sample_from_a_df(df=self.clade_proportion_df)
             sample_uids = self.clade_proportion_df.index.values.tolist()
             if self._if_clade_proportion_df_cache_exists():
                 self._set_clade_proportion_df_from_cache()
@@ -504,6 +508,8 @@ class RestrepoAnalysis:
             else:
                 self._set_clade_proportion_df_from_scratch(sample_uids)
 
+            self._report_clade_abund_proportions()
+
             # populate a dictionary that will hold the distances between each of the samples
             if self._if_clade_proportion_distance_dict_chache_exists():
                 clade_prop_distance_dict = self._set_clade_proportion_distance_dict_from_chache()
@@ -513,6 +519,31 @@ class RestrepoAnalysis:
             dist_file_as_list = self._make_clade_prop_distance_matrix_2dlist(clade_prop_distance_dict, sample_uids)
 
             self._clade_proportion_pcoa_coords_df(dist_file_as_list, sample_uids)
+
+    def _report_clade_abund_proportions(self):
+        # Two results to output here:
+        # 1 - how many samples has 1, 2, and 3 clades representative
+        # then, what were the average abundances of the 1, 2, and 3rd most abundant clades
+        # and how many samples were each of those numbers generated from.
+        num_clade_dd = defaultdict(int)
+        av_abund_of_the_nth_abundant_clade_dd = defaultdict(list)
+        for index, row in self.clade_proportion_df_non_normalised.iterrows():
+            non_zero_vals = row.iloc[row.to_numpy().nonzero()].values.tolist()
+            num_clade_dd[len(non_zero_vals)] += 1
+            sorted_vals = sorted(non_zero_vals, reverse=True)
+            for i, val in enumerate(sorted_vals):
+                av_abund_of_the_nth_abundant_clade_dd[i].append(val)
+        # now we have the containers populated and we can output the required results summaries
+        print('\n\n')
+        for i in range(3):
+            print(f'{num_clade_dd[i+1]} samples had sequnces from only {i+1} family')
+        print('\n\n')
+        for i in range(3):
+            num_samp = len(av_abund_of_the_nth_abundant_clade_dd[i])
+            av_abund = sum(av_abund_of_the_nth_abundant_clade_dd[i]) / num_samp
+            std = statistics.pstdev(av_abund_of_the_nth_abundant_clade_dd[i])
+            print(f'The average abundance of the {i+1} most abundant family '
+                  f'was {av_abund} (stdv: {std})from {num_samp} samples')
 
     def _clade_proportion_pcoa_coords_df(self, dist_file_as_list, sample_uids):
         pcoa_output = pcoa(np.array(dist_file_as_list))
