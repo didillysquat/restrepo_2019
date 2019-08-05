@@ -2234,9 +2234,9 @@ class RestrepoAnalysis:
     def _claclulate_av_abundance_of_clade_profiles(self, df_to_calculate_from):
 
         dd_dict_profile_av_rel_abunds = defaultdict(list)
-        for profile_uid in list(self.df_to_calculate_from):  # for every column/profile
-            indexers_non_zero = list(self.df_to_calculate_from[profile_uid].to_numpy().nonzero()[0])
-            non_zero_series = self.df_to_calculate_from[profile_uid].iloc[indexers_non_zero]
+        for profile_uid in list(df_to_calculate_from):  # for every column/profile
+            indexers_non_zero = list(df_to_calculate_from[profile_uid].to_numpy().nonzero()[0])
+            non_zero_series = df_to_calculate_from[profile_uid].iloc[indexers_non_zero]
             dd_dict_profile_av_rel_abunds[self.profile_meta_info_df.loc[profile_uid]['Clade']].append(
                 non_zero_series.mean())
         for clade in list('ACD'):
