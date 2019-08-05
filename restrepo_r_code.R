@@ -98,26 +98,6 @@ dis_matrix = as.dist(data.matrix(read.table(file="dists_permanova_samples_D.csv"
 meta_info = read.table(file='sample_meta_info_D.csv', header=TRUE, sep=',')
 adonis(formula = dis_matrix ~ reef_type*reef*species*depth*season, data=meta_info)
 
-# Tests of heterogeneity of dispersion using PERMDISP2
-# Species
-mod_species = betadisper(dis_matrix, meta_info$species)
-anova(mod_species)
-(mod_species.HSD = TukeyHSD(mod_species))
-plot(mod_species, segments = FALSE, ellipse=TRUE)
-
-# Season
-mod_season = betadisper(dis_matrix, meta_info$season)
-anova(mod_season)
-(mod_season.HSD = TukeyHSD(mod_season))
-plot(mod_season, segments = FALSE, ellipse=TRUE)
-
-# Depth
-mod_depth = betadisper(dis_matrix, meta_info$depth)
-anova(mod_depth)
-(mod_depth.HSD = TukeyHSD(mod_depth))
-permutest(mod_depth, pairwise=TRUE)
-plot(mod_depth, segments = FALSE, col = c('cyan', 'blue', 'blue4'), ellipse=TRUE)
-
 # Reef_type
 mod_reef_type = betadisper(dis_matrix, meta_info$reef_type)
 anova(mod_reef_type)
@@ -131,6 +111,27 @@ anova(mod_reef)
 (mod_reef.HSD = TukeyHSD(mod_reef))
 permutest(mod_reef, pairwise=TRUE)
 plot(mod_reef, segments = FALSE, ellipse=TRUE)
+
+# Tests of heterogeneity of dispersion using PERMDISP2
+# Species
+mod_species = betadisper(dis_matrix, meta_info$species)
+anova(mod_species)
+(mod_species.HSD = TukeyHSD(mod_species))
+plot(mod_species, segments = FALSE, ellipse=TRUE)
+
+# Depth
+mod_depth = betadisper(dis_matrix, meta_info$depth)
+anova(mod_depth)
+(mod_depth.HSD = TukeyHSD(mod_depth))
+permutest(mod_depth, pairwise=TRUE)
+plot(mod_depth, segments = FALSE, col = c('cyan', 'blue', 'blue4'), ellipse=TRUE)
+
+# Season
+mod_season = betadisper(dis_matrix, meta_info$season)
+anova(mod_season)
+(mod_season.HSD = TukeyHSD(mod_season))
+plot(mod_season, segments = FALSE, ellipse=TRUE)
+
 
 # CLADE PROPORTIONS PERMANOVA
 output_path = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/'
