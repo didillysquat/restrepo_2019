@@ -1707,8 +1707,8 @@ class RestrepoAnalysis:
         for i in range(len(self.clades)):
             self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr)
         print('Saving image')
-        plt.savefig(os.path.join(self.figure_dir, 'dendro_figure.png'), dpi=1200)
-        plt.savefig(os.path.join(self.figure_dir, 'dendro_figure.svg'), dpi=1200)
+        plt.savefig(os.path.join(self.figure_dir, f'dendro_figure_{self.profile_distance_method}_{self.cutoff_abund}.png'), dpi=1200)
+        plt.savefig(os.path.join(self.figure_dir, f'dendro_figure_{self.profile_distance_method}_{self.cutoff_abund}.svg'), dpi=1200)
 
     def _make_dendrogram_with_meta_fig_for_all_clades(self, clade_index, axarr):
         clade = self.clades[clade_index]
@@ -1951,7 +1951,19 @@ class RestrepoAnalysis:
 
     def _setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(self, list_of_widths):
         # in order (sub-cat, clade A, clade C, clade D)
-        plot_height_list = [6,25,42,24]
+        # We will set the hiehgts of the genera plots in proportion to the number of types for each genus
+        # in the cutoff df
+        dd_clade_counter = defaultdict(int)
+        for uid in list(self.profile_abundance_df_cutoff):
+            dd_clade_counter[self.profile_meta_info_df.loc[uid]['Clade']] += 1
+        # this is set from the original hardcoded numbers we can always adjust if needs be
+        total = 25+42+24
+        total_number_of_cutoff_profiles = len(list(self.profile_abundance_df_cutoff))
+        A_height = int((dd_clade_counter['A'] / total_number_of_cutoff_profiles) * total)
+        C_height = int((dd_clade_counter['C'] / total_number_of_cutoff_profiles) * total)
+        D_height = int((dd_clade_counter['D'] / total_number_of_cutoff_profiles) * total)
+
+        plot_height_list = [6,A_height,C_height,D_height]
 
         gs = gridspec.GridSpec( sum(plot_height_list), sum(list_of_widths))
         # 2d list where each list is a column contining multiple axes
@@ -2556,7 +2568,7 @@ class MetaInfoPlotter:
 
         self.prof_uid_to_smpl_uid_list_dict = prof_uid_to_smpl_uid_list_dict
         self.prof_uid_to_y_loc_dict = prof_uid_to_y_loc_dict
-        self.smpl_meta_df = self.parent.metadata_info_df
+        self.smpl_meta_df = self.parent.experimental_metadata_info_df
         # the space left between the info boxes of the plot
         # this should be set dynmaically at some point rather than hard coded
         self.meta_box_buffer = 1
@@ -2681,7 +2693,7 @@ class MetaInfoPlotter:
 
         def _get_rect_attributes(self, prof_uid, counter):
 
-            num_categories = len(self.category_list.items())
+            num_categories = len(self.category_list)
 
             bar_width = (1/(num_categories))
             x0_list = [i * bar_width for i in range(num_categories)]
@@ -2704,17 +2716,17 @@ class MetaInfoPlotter:
 
 
 if __name__ == "__main__":
-    rest_analysis = RestrepoAnalysis(cutoff_abund=0.05)
+    rest_analysis = RestrepoAnalysis(cutoff_abund=0.40)
 
     # run this to generate the dss and at id tuples that we can use in the SymPortal shell to get the specific
     # clade collection types that we can then generate distances from to make the dendrogram figure
     # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
     # cct_uid_string_005 and cct_uid_string_006
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
-
+    rest_analysis.make_dendrogram_with_meta_all_clades()
 
     # rest_analysis.output_seq_analysis_overview_outputs()
-    # rest_analysis.make_dendrogram_with_meta_all_clades()
+
     # rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
