@@ -61,13 +61,63 @@ from scipy.spatial.distance import braycurtis
 import itertools
 from skbio.stats.ordination import pcoa
 import statistics
+from multiprocessing import Pool
 
+def braycurtis_tup(u_v_tup, w=None):
+    import scipy.spatial.distance as distance
+    """
+    Compute the Bray-Curtis distance between two 1-D arrays.
+
+    Bray-Curtis distance is defined as
+
+    .. math::
+
+       \\sum{|u_i-v_i|} / \\sum{|u_i+v_i|}
+
+    The Bray-Curtis distance is in the range [0, 1] if all coordinates are
+    positive, and is undefined if the inputs are of length zero.
+
+    Parameters
+    ----------
+    u : (N,) array_like
+        Input array.
+    v : (N,) array_like
+        Input array.
+    w : (N,) array_like, optional
+        The weights for each value in `u` and `v`. Default is None,
+        which gives each value a weight of 1.0
+
+    Returns
+    -------
+    braycurtis : double
+        The Bray-Curtis distance between 1-D arrays `u` and `v`.
+
+    Examples
+    --------
+    >>> from scipy.spatial import distance
+    >>> distance.braycurtis([1, 0, 0], [0, 1, 0])
+    1.0
+    >>> distance.braycurtis([1, 1, 0], [0, 1, 0])
+    0.33333333333333331
+
+    """
+    u = u_v_tup[0]
+    v = u_v_tup[1]
+    u = distance._validate_vector(u)
+    v = distance._validate_vector(v, dtype=np.float64)
+    l1_diff = abs(u - v)
+    l1_sum = abs(u + v)
+    if w is not None:
+        w = distance._validate_weights(w)
+        l1_diff = w * l1_diff
+        l1_sum = w * l1_sum
+    return l1_diff.sum() / l1_sum.sum()
 
 class RestrepoAnalysis:
     """The class responsible for doing all python based analyses for the restrepo et al. 2019 paper.
     NB although we see clade F in the dataset this is minimal and so we will
     tackle this sepeately to the analysis of the A, C and D."""
-    def __init__(self, cutoff_abund, ignore_cache=False):
+    def __init__(self, cutoff_abund, seq_distance_method='unifrac', profile_distance_method='unifrac', ignore_cache=False):
         # root_dir is the root dir of the git repo
         self.root_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -117,27 +167,48 @@ class RestrepoAnalysis:
         self.prof_uid_to_name_dict = None
         self.prof_name_to_uid_dict = None
 
+        self.seq_distance_method = seq_distance_method
+        self.profile_distance_method = profile_distance_method
+
         # Between profile distances dataframe holder dict before 0.05 cutoff
+        # This same dict will be used to hold the pre-cutoff profile dfs regardless of the dist method used.
         self.between_profile_clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict()
 
-        # Between profile distances dataframe holder dict after 0.05 cutoff
-        if self.between_profile_clade_dist_cct_005_specific_path_dict['A']:
-            self.between_profile_clade_dist_cct_005_specific_df_dict = {}
-            # if we have the cct_speicifc distances
-            self._populate_clade_dist_df_dict(cct_specific='005')
+        self.cutoff_abund = cutoff_abund
+        # This one dict will be used to hold the post-cutoff profile dfs regardless of what cutoff
+        # is used and regardless of which distance method is employed.
+        self.between_profile_clade_dist_cct_specific_df_dict = {}
 
-        # Between profile distances dataframe holder dict after 0.40 cutoff
-        if self.between_profile_clade_dist_cct_040_specific_path_dict['A']:
-            self.between_profile_clade_dist_cct_040_specific_df_dict = {}
-            # if we have the cct_speicifc distances
-            self._populate_clade_dist_df_dict(cct_specific='040')
+        if self.profile_distance_method == 'braycurtis':
+            if self.cutoff_abund == 0.05:
+                # Between profile distances dataframe holder dict after 0.05 cutoff
+                if self.between_profile_clade_dist_cct_005_braycurtis_specific_path_dict['A']:
+                    # if we have the cct_speicifc distances
+                    self._populate_clade_dist_df_dict(cct_specific='005')
+            else:
+                # Between profile distances dataframe holder dict after 0.40 cutoff
+                if self.between_profile_clade_dist_cct_040_braycurtis_specific_path_dict['A']:
+                    # if we have the cct_speicifc distances
+                    self._populate_clade_dist_df_dict(cct_specific='040')
+        else: #  'unifrac'
+            if self.cutoff_abund == 0.05:
+                # Between profile distances dataframe holder dict after 0.05 cutoff
+                if self.between_profile_clade_dist_cct_005_unifrac_specific_path_dict['A']:
+                    # if we have the cct_speicifc distances
+                    self._populate_clade_dist_df_dict(cct_specific='005')
+            else:
+                # Between profile distances dataframe holder dict after 0.40 cutoff
+                if self.between_profile_clade_dist_cct_040_unifrac_specific_path_dict['A']:
+                    # if we have the cct_speicifc distances
+                    self._populate_clade_dist_df_dict(cct_specific='040')
 
         # Between sample distances dataframe
-        self.between_sample_clade_dist_df_dict_bc = {}
-        self.between_sample_clade_dist_df_dict_unif = {}
-        self._populate_clade_dist_df_dict(smp_dist='unifrac')
-        self._populate_clade_dist_df_dict(smp_dist='braycurtis')
+        # This one dict will be used to hold the between-sample distance dfs regardless of what
+        # distance method is employed.
+        self.between_sample_clade_dist_df_dict = {}
+        self._populate_clade_dist_df_dict(smp_dist=True)
+
 
         # ITS2 type profile abundance dataframe before 0.05 cutoff
         self.profile_abundance_df  = None
@@ -145,15 +216,10 @@ class RestrepoAnalysis:
         self.profile_meta_info_df = None
         self._populate_profile_abund_meta_dfs_and_info_containers()
 
-        self.type_uid_to_name_dict = {}
         # ITS2 type profile abundance dataframe after 0.05 cutoff
-        if cutoff_abund is not None:
-            self.cutoff_abund = cutoff_abund
-            self.profile_abundance_df_cutoff = None
-            self.create_profile_df_with_cutoff()
-        else:
-            self.cutoff_abund = cutoff_abund
-            self.profile_abundance_df_cutoff = None
+        self.profile_abundance_df_cutoff = None
+        self.create_profile_df_with_cutoff()
+
 
         # Temperature dataframe
         self.temperature_df = None
@@ -207,7 +273,7 @@ class RestrepoAnalysis:
         self.profile_abs_abund_ouput_path = os.path.join(self.base_sp_output_dir, 'its2_type_profiles', '77_DBV_20190721_2019-08-06_09-21-49.148787.profiles.absolute.abund_and_meta.txt')
 
         # Paths to seq count tables
-        self.seq_rel_abund_post_med_ouput_path = os.path.join(self.base_sp_output_dir, 'post_med_seqs', '77_DBV_20190721_2019-08-06_09-21-49.148787.seqs.relative.abund_and_meta.txt')
+        self.seq_rel_abund_post_med_ouput_path = os.path.join(self.base_sp_output_dir, 'post_med_seqs', '77_DBV_20190721_2019-08-06_09-21-49.148787.seqs.relative.abund_only.txt')
         self.seq_abs_abund_post_med_ouput_path = os.path.join(self.base_sp_output_dir, 'post_med_seqs', '77_DBV_20190721_2019-08-06_09-21-49.148787.seqs.absolute.abund_and_meta.txt')
 
         # Paths to the standard output profile distance files braycurtis derived
@@ -219,24 +285,39 @@ class RestrepoAnalysis:
         # Paths to the standard output profile distance files unifrac derived
         self.between_profile_clade_unifrac_dist_path_dict = {
             'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac', 'A',
-                              '2019-08-06_09-21-49.148787_unifrac_btwn_profile_distances_A.dist'),
+                              '2019-08-06_09-21-49.148787_unifrac_btwn_profile_distances_A_fixed.dist'),
             'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac', 'C',
-                              '2019-08-06_09-21-49.148787_unifrac_btwn_profile_distances_C.dist'),
+                              '2019-08-06_09-21-49.148787_unifrac_btwn_profile_distances_C_fixed.dist'),
             'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac', 'D',
-                              '2019-08-06_09-21-49.148787_unifrac_btwn_profile_distances_D.dist')}
+                              '2019-08-06_09-21-49.148787_unifrac_btwn_profile_distances_D_fixed.dist')}
 
-        # Paths to the cct specific distances at 0.05
-        self.between_profile_clade_dist_cct_005_specific_path_dict = {
-            'A': None,
-            'C': None,
-            'D': None
+
+        # Paths to the cct specific distances at 0.05 with braycurtis
+        self.between_profile_clade_dist_cct_005_braycurtis_specific_path_dict = {
+            'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'A', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_A.dist'),
+            'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'C', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_C.dist'),
+            'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'D', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_D.dist')
         }
 
-        # Paths to the cct specific distances at 0.40
-        self.between_profile_clade_dist_cct_040_specific_path_dict = {
-        'A': None,
-        'C': None,
-        'D': None
+        # Paths to the cct specific distances at 0.40 with braycurtis
+        self.between_profile_clade_dist_cct_040_braycurtis_specific_path_dict = {
+        'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_040', 'A', '2019-08-07_07-39-36.704269.bray_curtis_within_clade_profile_distances_A.dist'),
+        'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_040', 'C', '2019-08-07_07-39-36.704269.bray_curtis_within_clade_profile_distances_C.dist'),
+        'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_040', 'D', '2019-08-07_07-39-36.704269.bray_curtis_within_clade_profile_distances_D.dist')
+        }
+
+        # Paths to the cct specific distances at 0.05 with unifrac
+        self.between_profile_clade_dist_cct_005_unifrac_specific_path_dict = {
+            'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_005', 'A', '2019-08-07_07-28-12.765828_unifrac_btwn_profile_distances_A.dist'),
+            'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_005', 'C', '2019-08-07_07-28-12.765828_unifrac_btwn_profile_distances_C.dist'),
+            'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_005', 'D', '2019-08-07_07-28-12.765828_unifrac_btwn_profile_distances_D.dist')
+        }
+
+        # Paths to the cct specific distances at 0.40 with unifrac
+        self.between_profile_clade_dist_cct_040_unifrac_specific_path_dict = {
+            'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_040', 'A', '2019-08-07_07-41-48.044287_unifrac_btwn_profile_distances_A.dist'),
+            'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_040', 'C', '2019-08-07_07-41-48.044287_unifrac_btwn_profile_distances_C.dist'),
+            'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_040', 'D', '2019-08-07_07-41-48.044287_unifrac_btwn_profile_distances_D.dist')
         }
 
         # Paths to the sample distances (BrayCurtis sqrt transformed)
@@ -261,9 +342,9 @@ class RestrepoAnalysis:
             return pickle.load(open(os.path.join(self.cache_dir, 'seq_meta_data_df.p'), 'rb'))
         else:
             df = pd.read_csv(filepath_or_buffer=self.seq_abs_abund_post_med_ouput_path, sep='\t', header=0)
-            columns = ['sample_uid'] + df.columns.values.tolist()[1:]
-            df.columns = columns
-            df = df.iloc[:-5,:]
+            # columns = ['sample_uid'] + df.columns.values.tolist()[1:]
+            # df.columns = columns
+            df = df.iloc[:-1,:]
             df['sample_uid'] = pd.to_numeric(df['sample_uid'])
             df.set_index('sample_uid', drop=True, inplace=True)
             pickle.dump(df, open(os.path.join(self.cache_dir, 'seq_meta_data_df.p'), 'wb'))
@@ -491,22 +572,11 @@ class RestrepoAnalysis:
                 self.seq_meta_data_df.drop(index=uid, inplace=True, errors='ignore')
                 if self.profile_abundance_df_cutoff is not None:
                     self.profile_abundance_df_cutoff.drop(index=uid, inplace=True, errors='ignore')
-                if self.between_sample_clade_dist_df_dict_bc:
+                if self.between_sample_clade_dist_df_dict:
                     for clade in self.clades:
-                        if uid in self.between_sample_clade_dist_df_dict_bc[clade].index.values.tolist():
-                            self.between_sample_clade_dist_df_dict_bc[clade].drop(index=uid, inplace=True, errors='ignore')
-                            self.between_sample_clade_dist_df_dict_bc[clade].drop(columns=uid, inplace=True, errors='ignore')
-                if self.between_sample_clade_dist_df_dict_unif:
-                    for clade in self.clades:
-                        if uid in self.between_sample_clade_dist_df_dict_unif[clade].index.values.tolist():
-                            self.between_sample_clade_dist_df_dict_unif[clade].drop(index=uid, inplace=True, errors='ignore')
-                            self.between_sample_clade_dist_df_dict_unif[clade].drop(columns=uid, inplace=True, errors='ignore')
-                        elif name in self.between_sample_clade_dist_df_dict_unif[clade].index.values.tolist():
-                            self.between_sample_clade_dist_df_dict_unif[clade].drop(
-                                index=name, inplace=True, errors='ignore')
-                            self.between_sample_clade_dist_df_dict_unif[clade].drop(columns=name, inplace=True,
-                                                                                    errors='ignore')
-
+                        if uid in self.between_sample_clade_dist_df_dict[clade].index.values.tolist():
+                            self.between_sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True, errors='ignore')
+                            self.between_sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True, errors='ignore')
                 break
 
     def _del_problem_sample_from_a_df(self, df=None, list_of_dfs=None):
@@ -630,15 +700,28 @@ class RestrepoAnalysis:
         return dist_file_as_list
 
     def _make_clade_proportion_distance_dict_from_scratch(self, sample_uids):
-        clade_prop_distance_dict = {}
-        tot = len(sample_uids) * len(sample_uids)
-        count = 0
+        uid_list_dict = {uid: self.clade_proportion_df.loc[uid].values.tolist() for uid in sample_uids}
+        list_of_list_tups = []
+        name_pair_list = []
         for uid_one, uid_two in itertools.combinations(sample_uids, 2):
-            count += 1
-            sys.stdout.write(f'\r{str(count)}/{tot}')
-            distance = braycurtis(self.clade_proportion_df.loc[uid_one].values.tolist(),
-                                  self.clade_proportion_df.loc[uid_two].values.tolist())
-            clade_prop_distance_dict[frozenset({uid_one, uid_two})] = distance
+            name_pair_list.append((uid_one, uid_two))
+            list_of_list_tups.append((uid_list_dict[uid_one], uid_list_dict[uid_two]))
+
+        with Pool(7) as p:
+            dist_list_out = p.map(braycurtis_tup, list_of_list_tups)
+
+        foo = 'bar'
+
+        clade_prop_distance_dict = {frozenset({name_tup[0], name_tup[1]}) : dist for name_tup, dist in zip(name_pair_list, dist_list_out)}
+
+        # tot = len(sample_uids) * len(sample_uids)
+        # count = 0
+        # for uid_one, uid_two in itertools.combinations(sample_uids, 2):
+        #     count += 1
+        #     sys.stdout.write(f'\r{str(count)}/{tot}')
+        #     distance = braycurtis(self.clade_proportion_df.loc[uid_one].values.tolist(),
+        #                           self.clade_proportion_df.loc[uid_two].values.tolist())
+        #     clade_prop_distance_dict[frozenset({uid_one, uid_two})] = distance
         pickle.dump(clade_prop_distance_dict,
                     open(os.path.join(self.cache_dir, 'clade_prop_distance_dict.p'), 'wb'))
         return clade_prop_distance_dict
@@ -684,24 +767,25 @@ class RestrepoAnalysis:
         if os.path.exists(os.path.join(self.cache_dir, 'seq_df.p')):
             return pickle.load(open(os.path.join(self.cache_dir, 'seq_df.p'), 'rb'))
         else:
-            with open(self.seq_rel_abund_post_med_ouput_path, 'r') as f:
-                seq_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
+            # with open(self.seq_rel_abund_post_med_ouput_path, 'r') as f:
+            #     seq_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
 
-            df = pd.DataFrame(seq_data)
-            df.iat[0,0] = 'sample_uid'
-            df.columns = df.iloc[0]
-            df.drop(index=0, inplace=True)
-            df.drop(columns='sample_name', inplace=True)
-            df.set_index('sample_uid', drop=True, inplace=True)
-            # Get rid of all of the superflous columns only leaving the seq rel counts
-            df = df.iloc[:, 20:]
-            df = df[:-5]
-            df.index = df.index.astype('int')
-            df = df.astype('float')
+            df = pd.read_csv(filepath_or_buffer=self.seq_rel_abund_post_med_ouput_path, sep='\t', index_col=0, header=0)
+            # df = pd.DataFrame(seq_data)
+            # df.iat[0,0] = 'sample_uid'
+            # df.columns = df.iloc[0]
+            # df.drop(index=0, inplace=True)
+            # df.drop(columns='sample_name', inplace=True)
+            # df.set_index('sample_uid', drop=True, inplace=True)
+            # # Get rid of all of the superflous columns only leaving the seq rel counts
+            # df = df.iloc[:, 20:]
+            # df = df[:-5]
+            # df.index = df.index.astype('int')
+            # df = df.astype('float')
             pickle.dump(df, open(os.path.join(self.cache_dir, 'seq_df.p'), 'wb'))
             return df
 
-    def _init_metadata_info_df(self, meta_info_path):
+    def _init_metadata_info_df(self):
         """ This method produces a dataframe that has sample UID as key and
         'species', 'reef', 'reef_type', 'depth' 'season' as columns.
 
@@ -751,7 +835,7 @@ class RestrepoAnalysis:
         if os.path.exists(os.path.join(self.cache_dir, 'meta_info_df.p')):
             return pickle.load(open(os.path.join(self.cache_dir, 'meta_info_df.p'), 'rb'))
         else:
-            meta_info_df = pd.DataFrame.from_csv(meta_info_path)
+            meta_info_df = pd.DataFrame.from_csv(self.meta_data_input_path)
             # The same names in the meta info are different from those in the SymPortal output.
             # parse through the meta info names and make sure that they are found in only one of the SP output names
             # then, we can simply modify the sample uid to name dictionary (or better make a new one)
@@ -781,16 +865,11 @@ class RestrepoAnalysis:
                     self.profile_abundance_df.drop(index=uid, inplace=True)
                     if self.profile_abundance_df_cutoff is not None:
                         self.profile_abundance_df_cutoff.drop(index=uid, inplace=True)
-                    if self.between_sample_clade_dist_df_dict_bc:
+                    if self.between_sample_clade_dist_df_dict:
                         for clade in self.clades:
-                            if uid in self.between_sample_clade_dist_df_dict_bc[clade].index.values.tolist():
-                                self.between_sample_clade_dist_df_dict_bc[clade].drop(index=uid, inplace=True)
-                                self.between_sample_clade_dist_df_dict_bc[clade].drop(columns=uid, inplace=True)
-                    if self.between_sample_clade_dist_df_dict_unif:
-                        for clade in self.clades:
-                            if uid in self.between_sample_clade_dist_df_dict_unif[clade].index.values.tolist():
-                                self.between_sample_clade_dist_df_dict_unif[clade].drop(index=uid, inplace=True)
-                                self.between_sample_clade_dist_df_dict_unif[clade].drop(columns=uid, inplace=True)
+                            if uid in self.between_sample_clade_dist_df_dict[clade].index.values.tolist():
+                                self.between_sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True)
+                                self.between_sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True)
                     break
 
             # now that we have a conversion from new_name to old name, we can use this to look up the uid of the
@@ -839,7 +918,7 @@ class RestrepoAnalysis:
             new_name_to_old_name_dict[new_name] = 'M-17_3697_TIPC4'
             old_to_search.remove('M-17_3697_TIPC4')
 
-    def _populate_clade_dist_df_dict(self, cct_specific=None, smp_dist=None):
+    def _populate_clade_dist_df_dict(self, cct_specific=None, smp_dist=False):
         """If cct_specific is set then we are making dfs for the distance matrices that are from the bespoke
         set of CladeCollectionTypes. If not set then it is the first set of distances that have come straight out
         of the SymPortal analysis with no prior processing. I have implemented a simple cache system.
@@ -852,20 +931,14 @@ class RestrepoAnalysis:
 
     def pop_clade_dist_df_dict_from_cache_or_make_new(self, cct_specific, smp_dist):
         try:
-            if smp_dist == 'braycurtis':
-                self.between_sample_clade_dist_df_dict_bc = pickle.load(
-                    file=open(os.path.join(self.cache_dir, 'sample_clade_dist_df_dict_bc.p'), 'rb'))
-            elif smp_dist == 'unifrac':
-                self.between_sample_clade_dist_df_dict_unif = pickle.load(
-                    file=open(os.path.join(self.cache_dir, 'sample_clade_dist_df_dict_unif.p'), 'rb'))
-            elif cct_specific == '005':
-                self.between_profile_clade_dist_cct_005_specific_df_dict = pickle.load(
-                    file=open(os.path.join(self.cache_dir, 'clade_dist_cct_050_specific_dict.p'), 'rb'))
-            elif cct_specific == '040':
-                self.between_profile_clade_dist_cct_040_specific_df_dict = pickle.load(
-                    file=open(os.path.join(self.cache_dir, 'clade_dist_cct_040_specific_dict.p'), 'rb'))
-            else: # TODO it may be that this is no longer used and can be deleted
-                self.between_profile_clade_dist_df_dict = pickle.load(file=open(os.path.join(self.cache_dir, 'clade_dist_df_dict.p'), 'rb'))
+            if smp_dist:
+                self.between_sample_clade_dist_df_dict = pickle.load(
+                    file=open(os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}.p'), 'rb'))
+            if cct_specific:
+                self.between_profile_clade_dist_cct_specific_df_dict = pickle.load(
+                    file=open(os.path.join(self.cache_dir, f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'), 'rb'))
+            else:
+                self.between_profile_clade_dist_df_dict = pickle.load(file=open(os.path.join(self.cache_dir, f'profile_clade_dist_df_dict_{self.profile_distance_method}.p'), 'rb'))
         except FileNotFoundError:
             self._pop_clade_dict_df_dict_from_scratch_and_pickle_out(cct_specific, smp_dist)
 
@@ -873,16 +946,26 @@ class RestrepoAnalysis:
         self._pop_clade_dist_df_dict_from_scratch(cct_specific, smp_dist)
 
     def _pop_clade_dist_df_dict_from_scratch(self, cct_specific, smp_dist):
-        if smp_dist == 'braycurtis':
-            path_dict_to_use = self.between_sample_clade_dist_path_dict_braycurtis
-        elif smp_dist == 'unifrac':
-            path_dict_to_use = self.between_sample_clade_dist_path_dict_unifrac
+        if smp_dist:
+            if self.seq_distance_method == 'braycurtis':
+                path_dict_to_use = self.between_sample_clade_dist_path_dict_braycurtis
+            elif self.seq_distance_method == 'unifrac':
+                path_dict_to_use = self.between_sample_clade_dist_path_dict_unifrac
         elif cct_specific == '005':
-            path_dict_to_use = self.between_profile_clade_dist_cct_005_specific_path_dict
+            if self.profile_distance_method == 'braycurtis':
+                path_dict_to_use = self.between_profile_clade_dist_cct_005_braycurtis_specific_path_dict
+            else: #  'unifrac'
+                path_dict_to_use = self.between_profile_clade_dist_cct_005_unifrac_specific_path_dict
         elif cct_specific == '040':
-            path_dict_to_use = self.between_profile_clade_dist_cct_040_specific_path_dict
+            if self.profile_distance_method == 'braycurtis':
+                path_dict_to_use = self.between_profile_clade_dist_cct_040_braycurtis_specific_path_dict
+            else:  # 'unifrac'
+                path_dict_to_use = self.between_profile_clade_dist_cct_040_unifrac_specific_path_dict
         else:
-            path_dict_to_use = self.between_profile_clade_dist_path_dict
+            if self.profile_distance_method == 'braycurtis':
+                path_dict_to_use = self.between_profile_clade_braycurtis_dist_path_dict
+            else: #  'unifrac'
+                path_dict_to_use = self.between_profile_clade_unifrac_dist_path_dict
 
         for clade in self.clades:
             with open(path_dict_to_use[clade], 'r') as f:
@@ -893,40 +976,28 @@ class RestrepoAnalysis:
 
             df = pd.DataFrame(clade_data)
 
-            if not smp_dist:
-                self.type_uid_to_name_dict = {int(uid): name for uid, name in zip(df[1], df[0])}
 
-            if smp_dist == 'braycurtis':
-                df.drop(columns=0, inplace=True)
-                df.set_index(keys=1, drop=True, inplace=True)
-                df.index = df.index.astype('int')
-                df.columns = df.index.values.tolist()
+            df.drop(columns=0, inplace=True)
+            df.set_index(keys=1, drop=True, inplace=True)
+            df.index = df.index.astype('int')
+            df.columns = df.index.values.tolist()
 
-            if smp_dist == 'braycurtis':
-                self.between_sample_clade_dist_df_dict_bc[clade] = df.astype(dtype='float')
-            elif smp_dist == 'unifrac':
-                self.between_sample_clade_dist_df_dict_unif[clade] = df.astype(dtype='float')
-            elif cct_specific == '005':
-                self.between_profile_clade_dist_cct_005_specific_df_dict[clade] = df.astype(dtype='float')
-            elif cct_specific == '040':
-                self.between_profile_clade_dist_cct_040_specific_df_dict[clade] = df.astype(dtype='float')
+            if smp_dist:
+                self.between_sample_clade_dist_df_dict[clade] = df.astype(dtype='float')
+            elif cct_specific:
+                self.between_profile_clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
             else:
                 self.between_profile_clade_dist_df_dict[clade] = df.astype(dtype='float')
 
-        if smp_dist == 'braycurtis':
-            pickle.dump(obj=self.between_sample_clade_dist_df_dict_bc,
-                        file=open(os.path.join(self.cache_dir, 'sample_clade_dist_df_dict_bc.p'), 'wb'))
-        elif smp_dist == 'unifrac':
-            pickle.dump(obj=self.between_sample_clade_dist_df_dict_unif,
-                        file=open(os.path.join(self.cache_dir, 'sample_clade_dist_df_dict_unif.p'), 'wb'))
-        elif cct_specific == '005':
-            pickle.dump(obj=self.between_profile_clade_dist_cct_005_specific_df_dict,
-                        file=open(os.path.join(self.cache_dir, 'clade_dist_cct_005_specific_dict.p'), 'wb'))
-        elif cct_specific == '040':
-            pickle.dump(obj=self.between_profile_clade_dist_cct_005_specific_df_dict,
-                        file=open(os.path.join(self.cache_dir, 'clade_dist_cct_040_specific_dict.p'), 'wb'))
+        # pickle out the distance dataframe dictionaries according to what sort of dist they are.
+        if smp_dist:
+            pickle.dump(obj=self.between_sample_clade_dist_df_dict,
+                        file=open(os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}.p'), 'wb'))
+        elif cct_specific:
+            pickle.dump(obj=self.between_profile_clade_dist_cct_specific_df_dict,
+                        file=open(os.path.join(self.cache_dir, f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'), 'wb'))
         else:
-            pickle.dump(obj=self.between_profile_clade_dist_df_dict, file=open(os.path.join(self.cache_dir, 'clade_dist_df_dict.p'), 'wb'))
+            pickle.dump(obj=self.between_profile_clade_dist_df_dict, file=open(os.path.join(self.cache_dir, f'profile_clade_dist_df_dict_{self.profile_distance_method}.p'), 'wb'))
 
     def _populate_profile_abund_meta_dfs_and_info_containers(self):
         if os.path.exists(os.path.join(self.cache_dir, 'profile_abund_df.p')):
@@ -2152,7 +2223,9 @@ class RestrepoAnalysis:
         #     cc = CladeCollection.objects.get(data_set_sample_from=dss, clade=at.clade)
         #     cct = CladeCollectionType.objects.get(analysis_type_of=at, clade_collection_found_in=cc)
         #     cct_id_list.append(cct.id)
-
+        # with open('cct_uids_005', 'w') as f:
+        #    for uid in cct_id_list:
+        #        f.write(f'{str(uid)}\n')
 
         # from the code here we can get a list that contains tuples of DataSetSample uids to AnalysisType uid for the
         # sample type pairings that we are interested in (i.e. the non-zeros in the cutoff df). We can then use these
@@ -2162,10 +2235,15 @@ class RestrepoAnalysis:
 
         # https://stackoverflow.com/questions/26854091/getting-index-column-pairs-for-true-elements-of-a-boolean-dataframe-in-pandas
         index_column_tups = list(self.profile_abundance_df_cutoff[self.profile_abundance_df_cutoff > 0].stack().index)
-        with open(self.uid_pairs_for_ccts_path, 'w') as f:
+        if self.cutoff_abund == 0.05:
+            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_005')
+        else: #  0.40
+            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_040')
+
+        with open(uid_pairs_for_ccts_path, 'w') as f:
             for tup in index_column_tups:
                 f.write(f'{tup[0]}\t{tup[1]}\n')
-        print(f'A list of tuples has been output to {self.uid_pairs_for_ccts_path} that represent the UID of paired '
+        print(f'A list of tuples has been output to {uid_pairs_for_ccts_path} that represent the UID of paired '
               f'DataSetSample and AnalysisType objects found in the filtered dataframe. '
               f'From these you can get the CladeCollectionTypes. This can then be fed into the distance output function'
               f'to calculate ITS2 type profile distances based only on these pairings.')
@@ -2626,66 +2704,26 @@ class MetaInfoPlotter:
 
 
 if __name__ == "__main__":
-    rest_analysis = RestrepoAnalysis(
-        base_input_dir = os.path.join(
-            '/Users', 'humebc', 'Google_Drive', 'projects', 'alejandro_et_al_2018',
-            'resources', 'sp_outputs_20190807', '2019-08-06_09-21-49.148787'),
-        # profile count tables
-        profile_rel_abund_ouput_path=os.path.join('its2_type_profiles', '77_DBV_20190721_2019-08-06_09-21-49.148787.profiles.relative.abund_and_meta.txt'),
-        profile_abs_abund_ouput_path=os.path.join('its2_type_profiles', '77_DBV_20190721_2019-08-06_09-21-49.148787.profiles.absolute.abund_and_meta.txt'),
+    rest_analysis = RestrepoAnalysis(cutoff_abund=0.05)
 
-        # sequence count tables
-        seq_rel_abund_ouput_path=os.path.join('post_med_seqs', '77_DBV_20190721_2019-08-06_09-21-49.148787.seqs.relative.abund_and_meta.txt'),
-        seq_abs_abund_ouput_path=os.path.join('post_med_seqs', '77_DBV_20190721_2019-08-06_09-21-49.148787.seqs.absolute.abund_and_meta.txt'),
+    # run this to generate the dss and at id tuples that we can use in the SymPortal shell to get the specific
+    # clade collection types that we can then generate distances from to make the dendrogram figure
+    # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
+    # cct_uid_string_005 and cct_uid_string_006
+    # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
 
-        # profile distances braycurtis
-        clade_A_profile_braycurtis_dist_relative_path=os.path.join('between_profile_distances_braycurtis', 'A', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_A.dist'),
-        clade_C_profile_braycurtis_dist_relative_path=os.path.join(
-            'between_profile_distances_braycurtis', 'C',
-            '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_C.dist'),
-        clade_D_profile_braycurtis_dist_relative_path=os.path.join(
-            'between_profile_distances_braycurtis', 'D',
-            '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_D.dist'),
 
-        # profile distances from specific cct 0.05
-        clade_A_profile_dist_cct_05_specific_relative_path=None,
-        clade_C_profile_dist_cct_05_specific_relative_path=None,
-        clade_D_profile_dist_cct_05_specific_relative_path=None,
-
-        # profile distances from specific cct 0.4
-        clade_A_profile_dist_cct_40_specific_relative_path=None,
-        clade_C_profile_dist_cct_40_specific_relative_path=None,
-        clade_D_profile_dist_cct_40_specific_relative_path=None,
-
-        meta_data_input_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/meta_info.csv',
-        clade_A_smpl_dist_relative_path_braycurtis=os.path.join(
-            'between_sample_distance_sqrt_trans', 'A',
-            '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_A.dist'),
-        clade_C_smpl_dist_relative_path_braycurtis=os.path.join(
-            'between_sample_distance_sqrt_trans', 'C',
-            '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_C.dist'),
-        clade_D_smpl_dist_relative_path_braycurtis=os.path.join(
-            'between_sample_distance_sqrt_trans', 'D',
-            '2019-05-06_05-07-17.800728.bray_curtis_sample_distances_D.dist'),
-        clade_A_smpl_dist_absolute_path_unifrac='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/sp_outputs_20190805/unifrac_btwn_sample/2019-08-05_04-25-54_243924/between_samples/A/2019-08-05_04-25-54.243924_unifrac_btwn_sample_distances_A.dist',
-        clade_C_smpl_dist_absolute_path_unifrac='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/sp_outputs_20190805/unifrac_btwn_sample/2019-08-05_04-25-54_243924/between_samples/C/2019-08-05_04-25-54.243924_unifrac_btwn_sample_distances_C.dist',
-        clade_D_smpl_dist_absolute_path_unifrac='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/sp_outputs_20190805/unifrac_btwn_sample/2019-08-05_04-25-54_243924/between_samples/D/2019-08-05_04-25-54.243924_unifrac_btwn_sample_distances_D.dist',
-        cutoff_abund=0.40, gis_path='/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/gis',
-        hobo_dir = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/resources/HOBO/hobo_csv')
     # rest_analysis.output_seq_analysis_overview_outputs()
-
     # rest_analysis.make_dendrogram_with_meta_all_clades()
     # rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
     # rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
-    rest_analysis.permute_sample_permanova(dist_method='unifrac')
-
+    # rest_analysis.permute_sample_permanova(dist_method='unifrac')
     # rest_analysis.make_sample_balance_figure()
-
     # rest_analysis.permute_profile_permanova()
-    # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
+
     # rest_analysis.histogram_of_all_abundance_values()
 
 
