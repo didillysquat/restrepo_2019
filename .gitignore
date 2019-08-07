@@ -1,4 +1,5 @@
 outputs/
+input/
 __pycache__/
 .idea/
 cache/
