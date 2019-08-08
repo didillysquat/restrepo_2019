@@ -62,6 +62,7 @@ import itertools
 from skbio.stats.ordination import pcoa
 import statistics
 from multiprocessing import Pool
+from statistics import variance
 
 def braycurtis_tup(u_v_tup, w=None):
     import scipy.spatial.distance as distance
@@ -117,7 +118,7 @@ class RestrepoAnalysis:
     """The class responsible for doing all python based analyses for the restrepo et al. 2019 paper.
     NB although we see clade F in the dataset this is minimal and so we will
     tackle this sepeately to the analysis of the A, C and D."""
-    def __init__(self, cutoff_abund, seq_distance_method='unifrac', profile_distance_method='unifrac', ignore_cache=False):
+    def __init__(self, cutoff_abund, seq_distance_method='unifrac', profile_distance_method='unifrac', ignore_cache=False, remove_se=False):
         # root_dir is the root dir of the git repo
         self.root_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -154,6 +155,8 @@ class RestrepoAnalysis:
 
         # whether to use the cache system
         self.ignore_cache = ignore_cache
+        # whether to remove S. hystrix samples from the clade C matrix
+        self.remove_se=remove_se
 
         self.clades = list('ACD')
         self.clade_genera_labels = ['Symbiodinium', 'Cladocopium', 'Durisdinium']
@@ -2336,25 +2339,29 @@ class RestrepoAnalysis:
     def permute_sample_permanova(self, dist_method='braycurtis'):
         meta_df = self.experimental_metadata_info_df
         for clade in self.clades:
+
+            clade_sample_dist_df = self.between_sample_clade_dist_df_dict[clade]
             if dist_method == 'braycurtis':
-                clade_sample_dist_df = self.between_sample_clade_dist_df_dict_bc[clade]
-                output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_bc.csv')
+                if self.remove_se and clade == 'D':
+                    clade_sample_dist_df = self._remove_se_from_df(clade_sample_dist_df)
+                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_bc_no_se.csv')
+                else:
+                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_bc.csv')
             else: # dist_method == 'unifrac'
-                clade_sample_dist_df = self.between_sample_clade_dist_df_dict_unif[clade]
-                output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_unif.csv')
+                if self.remove_se and clade == 'D':
+                    clade_sample_dist_df = self._remove_se_from_df(clade_sample_dist_df)
+                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_unif_no_se.csv')
+                else:
+                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_unif.csv')
+
             clade_sample_dist_df.to_csv(path_or_buf=output_path_dist_matrix, sep=',', header=False, index=False, line_terminator='\n')
 
-            # we will also need to output the metainfo df for the analysis type instances in question
-            if dist_method == 'unifrac':
-                # Then we need to use the sample names to get the list of uids to grab from the meta
-                uid_list = []
-                for smp_name in clade_sample_dist_df.index.values.tolist():
-                    uid = self.smp_name_to_uid_dict[smp_name]
-                    uid_list.append(uid)
-                meta_info_df_for_clade = meta_df.loc[uid_list, :]
-            else: # bray curtis
-                meta_info_df_for_clade = meta_df.loc[clade_sample_dist_df.index.values.tolist(), :]
-            output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}.csv')
+            meta_info_df_for_clade = meta_df.loc[clade_sample_dist_df.index.values.tolist(), :]
+
+            if self.remove_se and clade == 'D':
+                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_no_se.csv')
+            else:
+                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}.csv')
 
             # # If you want to append shuffled versions of the meta then you can use the code below
             # output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_shuffled.csv')
@@ -2383,6 +2390,16 @@ class RestrepoAnalysis:
             # condensed_dist = scipy.spatial.distance.squareform(clade_sample_dist_df)
             # this = skbio.stats.distance.permdisp(distance_matrix=dist_obj, grouping=meta_info_df_for_clade['season'])
             # apples = 'asdf'
+
+    def _remove_se_from_df(self, clade_sample_dist_df):
+        # remove the samples uids from the dist matrix that are S. hystrix species
+        uids_to_remove = []
+        for uid in clade_sample_dist_df.index:
+            if self.experimental_metadata_info_df.at[uid, 'species'] == "SE":
+                uids_to_remove.append(uid)
+        # now remove the uids both from the cols and the rows
+        dropped_df = clade_sample_dist_df.drop(index=uids_to_remove, columns=uids_to_remove)
+        return dropped_df
 
     def output_seq_analysis_overview_outputs(self):
         self._report_sequencing_overview()
@@ -2540,6 +2557,102 @@ class RestrepoAnalysis:
         total_num_profile_instances_for_clade = sum(sorted_df['ITS2 type abundance DB'])
         percent_rep_by_most_abund_profiles = sum_of_first_half_most_abundant_profiles / total_num_profile_instances_for_clade
         print(f'The 50% most abundant profiles represented {percent_rep_by_most_abund_profiles} of the {total_num_profile_instances_for_clade} total profile-sample occurences for this genus.')
+
+    def assess_balance_and_dispersions_of_distance_matrix(self):
+        """This method will be used to investigate the pairwise comparisons that have shown significant
+        PERMDISP test results. It will look at how balanced the factors are and what the dispersion looks like"""
+
+        # in the aderson paper.
+        # First for each clade and for each factor check to see what the ratios for numbers are
+        for clade in self.clades:
+            print(f'\n\nExamining balance for {clade}')
+            for factor in list(self.experimental_metadata_info_df):
+                print(f'\nExaminging balanace for factor {factor}')
+                factor_counter_dd, max_val = self._populate_factor_counter_and_get_max_val(clade, factor)
+                output_str = ''
+                for dd_k, dd_v in factor_counter_dd.items():
+                    output_str += f'{dd_k}: {dd_v/max_val}; '
+                print(f'{factor} balance ratios are: {output_str}')
+        foo = 'asdf'
+
+        # now we look at the variance ratios between the pairwise group comparisons
+        # for every clade and factor combo
+        for clade in self.clades:
+            print(f'\n\nExamining variance ratios for {clade}')
+            for factor in list(self.experimental_metadata_info_df):
+
+                print(f'\nExaminging variance ratios for factor {factor}')
+                factor_counter_dd, max_val = self._populate_factor_counter_and_get_max_val(clade, factor)
+                if clade == 'D':
+                    if factor == 'species':
+                        foo = 'basr'
+                # for each group that is in factor get a list of the distances and hold it in dd
+                # this dict will have a key for every group in the factor that is present in the clade distance matrix
+                # for each key there will be a value that is a list of the interpoint distances for only the samples
+                # that are of the given group. We will calculate the variance of these points
+                inter_point_dist_per_group_of_factor_dd = defaultdict(list)
+
+                # This dictionary will hold the results of the variance calculation from the dd above.
+                # As such it will be group as key and variance as value
+                variance_per_group_of_factor_dict = dict()
+
+                for group in factor_counter_dd:
+                    # for each sample uid in the btwn sample dist matrix
+                    # if the sample is of the group
+                    # then add this uid to list
+                    smp_uids_of_group = []
+                    for smp_uid in self.between_sample_clade_dist_df_dict[clade].index:
+                        if self.experimental_metadata_info_df.at[smp_uid, factor] == group:
+                            smp_uids_of_group.append(smp_uid)
+                    # now go pairwise for each uid in the list and populate
+                    for uid_1, uid_2 in itertools.combinations(smp_uids_of_group, 2):
+                        inter_point_dist_per_group_of_factor_dd[group].append(self.between_sample_clade_dist_df_dict[clade].at[uid_1, uid_2])
+
+                    # Now to the variance calculation
+                    variance_per_group_of_factor_dict[group] = variance(inter_point_dist_per_group_of_factor_dd[group])
+                # now that we have the interpoint distances for each of the groups for the factor
+                # we can now do the pairwise comparisons between the groups of the factors to workout variance ratios
+                # For each of the ratio calculations we will always make sure to but the less abundant
+                # group as the numerator and the more abundant as the denominator.
+                # This way we can look for positive values of the variance ratios as a sign that something is not good
+                # I.e. this will show us that despite being less abundant a group has a bigger dispersion than a more
+                # abundant group.
+
+                pw_var_ratio_dict = {}
+                for group_1, group_2 in itertools.combinations(variance_per_group_of_factor_dict, 2):
+                    if factor_counter_dd[group_1] > factor_counter_dd[group_2]:
+                        pw_var_ratio_dict[frozenset({group_1, group_2})] = variance_per_group_of_factor_dict[group_2]/variance_per_group_of_factor_dict[group_1]
+                    else:
+                        pw_var_ratio_dict[frozenset({group_1, group_2})] = variance_per_group_of_factor_dict[group_1]/variance_per_group_of_factor_dict[group_2]
+
+                # now we can create a dataframe of the values
+                fixed_list_groups = list(variance_per_group_of_factor_dict.keys())
+                df = pd.DataFrame(columns=fixed_list_groups, index=fixed_list_groups)
+                for outer_group in fixed_list_groups:
+                    for inner_group in fixed_list_groups:
+                        if outer_group == inner_group:
+                            df.at[outer_group, inner_group] = 1
+                        else:
+                            var_ratio = pw_var_ratio_dict[frozenset({outer_group, inner_group})]
+                            abund_ratio = factor_counter_dd[outer_group]/factor_counter_dd[inner_group]
+                            bad_abund=False
+                            if abund_ratio > 2 or abund_ratio < 0.5:
+                                bad_abund=True
+                            df.at[outer_group, inner_group] = var_ratio
+                            if var_ratio > 1 and bad_abund:
+                                print(f'Clade {clade}, factor {factor}, combo {outer_group}_{inner_group} is bad. Var ratio was {var_ratio}. Abund ratio was {abund_ratio}.')
+
+
+                foo = 'bar'
+
+
+    def _populate_factor_counter_and_get_max_val(self, clade, factor):
+        factor_counter_dd = defaultdict(int)
+        for smp_ind in self.between_sample_clade_dist_df_dict[clade].index:
+            factor_counter_dd[self.experimental_metadata_info_df.at[smp_ind, factor]] += 1
+        # here we have the factor counter populated
+        max_val = max(factor_counter_dd.values())
+        return factor_counter_dd, max_val
 
 
 class MetaInfoPlotter:
@@ -2715,16 +2828,22 @@ class MetaInfoPlotter:
             return y0_list, x0_list, heights_list, width_list,
 
 
+
 if __name__ == "__main__":
-    rest_analysis = RestrepoAnalysis(cutoff_abund=0.40)
+    rest_analysis = RestrepoAnalysis(cutoff_abund=0.40, remove_se=True)
+    # When we ran the analysis of variance ratios within the context of the between sample distance permanova analysis
+    # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
+    # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
+
+
 
     # run this to generate the dss and at id tuples that we can use in the SymPortal shell to get the specific
     # clade collection types that we can then generate distances from to make the dendrogram figure
     # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
     # cct_uid_string_005 and cct_uid_string_006
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
-    rest_analysis.make_dendrogram_with_meta_all_clades()
-
+    # rest_analysis.make_dendrogram_with_meta_all_clades()
+    # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
 
     # rest_analysis.plot_pcoa_of_cladal()
@@ -2732,7 +2851,7 @@ if __name__ == "__main__":
     # rest_analysis._quaternary_plot()
     # rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
-    # rest_analysis.permute_sample_permanova(dist_method='unifrac')
+    rest_analysis.permute_sample_permanova(dist_method='unifrac')
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_profile_permanova()
 
