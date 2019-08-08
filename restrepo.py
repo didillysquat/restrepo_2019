@@ -118,7 +118,7 @@ class RestrepoAnalysis:
     """The class responsible for doing all python based analyses for the restrepo et al. 2019 paper.
     NB although we see clade F in the dataset this is minimal and so we will
     tackle this sepeately to the analysis of the A, C and D."""
-    def __init__(self, cutoff_abund, seq_distance_method='unifrac', profile_distance_method='unifrac', ignore_cache=False, remove_se=False):
+    def __init__(self, cutoff_abund, seq_distance_method='unifrac', profile_distance_method='unifrac', ignore_cache=False, remove_se=False, maj_only=False):
         # root_dir is the root dir of the git repo
         self.root_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -155,8 +155,11 @@ class RestrepoAnalysis:
 
         # whether to use the cache system
         self.ignore_cache = ignore_cache
-        # whether to remove S. hystrix samples from the clade C matrix
+        # whether to remove S. hystrix samples from the clade D matrix
         self.remove_se=remove_se
+        # whether to only include only samples into a given clades distance matrix that have
+        # that clade as their majoirty
+        self.maj_only=maj_only
 
         self.clades = list('ACD')
         self.clade_genera_labels = ['Symbiodinium', 'Cladocopium', 'Durisdinium']
@@ -249,6 +252,7 @@ class RestrepoAnalysis:
         self.between_sample_clade_proportion_distances_df = None
         self.clade_prop_pcoa_coords = None
         self._create_clade_prop_distances()
+        self.clade_proportion_df_non_normalised = self.clade_proportion_df_non_normalised.astype(float)
 
         # info dictionaries
         self.old_color_dict = {
@@ -2342,15 +2346,26 @@ class RestrepoAnalysis:
 
             clade_sample_dist_df = self.between_sample_clade_dist_df_dict[clade]
             if dist_method == 'braycurtis':
-                if self.remove_se and clade == 'D':
+
+                if self.remove_se and clade == 'D' and not self.maj_only:
                     clade_sample_dist_df = self._remove_se_from_df(clade_sample_dist_df)
                     output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_bc_no_se.csv')
+                elif self.maj_only:
+                    clade_sample_dist_df = self._remove_non_maj_from_df(clade_sample_dist_df=clade_sample_dist_df, clade=clade)
+                    output_path_dist_matrix = os.path.join(self.outputs_dir,
+                                                           f'dists_permanova_samples_{clade}_bc_only_maj.csv')
                 else:
                     output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_bc.csv')
+
+
             else: # dist_method == 'unifrac'
-                if self.remove_se and clade == 'D':
+                if self.remove_se and clade == 'D' and not self.maj_only:
                     clade_sample_dist_df = self._remove_se_from_df(clade_sample_dist_df)
                     output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_unif_no_se.csv')
+                elif self.maj_only:
+                    clade_sample_dist_df = self._remove_non_maj_from_df(clade_sample_dist_df=clade_sample_dist_df, clade=clade)
+                    output_path_dist_matrix = os.path.join(self.outputs_dir,
+                                                           f'dists_permanova_samples_{clade}_unif_only_maj.csv')
                 else:
                     output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_unif.csv')
 
@@ -2358,8 +2373,10 @@ class RestrepoAnalysis:
 
             meta_info_df_for_clade = meta_df.loc[clade_sample_dist_df.index.values.tolist(), :]
 
-            if self.remove_se and clade == 'D':
+            if self.remove_se and clade == 'D' and not self.maj_only:
                 output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_no_se.csv')
+            elif self.maj_only:
+                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_only_maj.csv')
             else:
                 output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}.csv')
 
@@ -2391,8 +2408,19 @@ class RestrepoAnalysis:
             # this = skbio.stats.distance.permdisp(distance_matrix=dist_obj, grouping=meta_info_df_for_clade['season'])
             # apples = 'asdf'
 
-    def _remove_se_from_df(self, clade_sample_dist_df):
+    def _remove_non_maj_from_df(self, clade_sample_dist_df, clade):
         # remove the samples uids from the dist matrix that are S. hystrix species
+        maj_clade_ser = self.clade_proportion_df_non_normalised.idxmax(axis=1)
+        clade_maj_only_uids = maj_clade_ser.index[maj_clade_ser != clade].tolist()
+        # now remove the uids both from the cols and the rows
+        ind_list_of_df = clade_sample_dist_df.index.values.tolist()
+        # this = set(clade_maj_only_uids) & set(ind_list_of_df)
+        # some of the UIDs will not be in the df as they did not have any of this clade.
+        dropped_df = clade_sample_dist_df.drop(index=clade_maj_only_uids, columns=clade_maj_only_uids, errors='ignore')
+        return dropped_df
+
+    def _remove_se_from_df(self, clade_sample_dist_df):
+        # remove the samples uids from the dist matrix that do not have the clade in question as their maj
         uids_to_remove = []
         for uid in clade_sample_dist_df.index:
             if self.experimental_metadata_info_df.at[uid, 'species'] == "SE":
@@ -2562,7 +2590,11 @@ class RestrepoAnalysis:
         """This method will be used to investigate the pairwise comparisons that have shown significant
         PERMDISP test results. It will look at how balanced the factors are and what the dispersion looks like"""
 
-        # in the aderson paper.
+        # we will strip the between sample matrices of non-maj samples if self.maj_only is true before assessing
+        # variances as below
+        if self.maj_only:
+            for clade in self.clades:
+                self.between_sample_clade_dist_df_dict[clade] = self._remove_non_maj_from_df(clade_sample_dist_df=self.between_sample_clade_dist_df_dict[clade], clade=clade)
         # First for each clade and for each factor check to see what the ratios for numbers are
         for clade in self.clades:
             print(f'\n\nExamining balance for {clade}')
@@ -2609,7 +2641,10 @@ class RestrepoAnalysis:
                         inter_point_dist_per_group_of_factor_dd[group].append(self.between_sample_clade_dist_df_dict[clade].at[uid_1, uid_2])
 
                     # Now to the variance calculation
-                    variance_per_group_of_factor_dict[group] = variance(inter_point_dist_per_group_of_factor_dd[group])
+                    try:
+                        variance_per_group_of_factor_dict[group] = variance(inter_point_dist_per_group_of_factor_dd[group])
+                    except statistics.StatisticsError:
+                        variance_per_group_of_factor_dict[group] = 0
                 # now that we have the interpoint distances for each of the groups for the factor
                 # we can now do the pairwise comparisons between the groups of the factors to workout variance ratios
                 # For each of the ratio calculations we will always make sure to but the less abundant
@@ -2830,7 +2865,7 @@ class MetaInfoPlotter:
 
 
 if __name__ == "__main__":
-    rest_analysis = RestrepoAnalysis(cutoff_abund=0.40, remove_se=True)
+    rest_analysis = RestrepoAnalysis(cutoff_abund=0.40, remove_se=True, maj_only=True)
     # When we ran the analysis of variance ratios within the context of the between sample distance permanova analysis
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
@@ -2843,7 +2878,7 @@ if __name__ == "__main__":
     # cct_uid_string_005 and cct_uid_string_006
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     # rest_analysis.make_dendrogram_with_meta_all_clades()
-    # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
+    rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
 
     # rest_analysis.plot_pcoa_of_cladal()
@@ -2851,7 +2886,7 @@ if __name__ == "__main__":
     # rest_analysis._quaternary_plot()
     # rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
-    rest_analysis.permute_sample_permanova(dist_method='unifrac')
+    # rest_analysis.permute_sample_permanova(dist_method='unifrac')
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_profile_permanova()
 
