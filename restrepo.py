@@ -240,13 +240,13 @@ class RestrepoAnalysis:
         # goes with it and then pass this pairing into the schematic making code.
         self.profile_abundance_df_cutoff_high = None
         self.prof_uid_to_local_abund_dict_cutoff_high = {}
-        self.profile_distance_df_dict_cutoff_high = None
+        self.profile_distance_df_dict_cutoff_high = {}
         self._create_profile_df_with_cutoff_high_low(cutoff_low=0.40)
         self._populate_clade_dist_df_dict(cct_specific='040')
         # TODO we need to get the tup list and create the specific cct distances for the 0.05-0.40 distances
         self.profile_abundance_df_cutoff_low = None
         self.prof_uid_to_local_abund_dict_cutoff_low = {}
-        self.profile_distance_df_dict_cutoff_low = None
+        self.profile_distance_df_dict_cutoff_low = {}
         self._create_profile_df_with_cutoff_high_low(cutoff_low=0.05, cutoff_high=0.40)
         self.get_list_of_clade_col_type_uids_for_unifrac(high_low='low')
         self._populate_clade_dist_df_dict(cct_specific='low')
@@ -356,12 +356,12 @@ class RestrepoAnalysis:
 
         # Paths to the cct specific distances at abundances between 0.05 and 0.40 unifrac
         self.between_profile_clade_dist_cct_low_unifrac_specific_path_dict = {
-            'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_low', 'A',
+            'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_low', 'A',
+                              '2019-08-14_06-06-38.037792_unifrac_btwn_profile_distances_A.dist'),
+            'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_low', 'C',
                               '2019-08-14_06-06-38.037792_unifrac_btwn_profile_distances_C.dist'),
-            'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_low', 'C',
-                              '2019-08-14_06-06-38.037792_unifrac_btwn_profile_distances_C.dist'),
-            'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_low', 'D',
-                              '2019-08-14_06-06-38.037792_unifrac_btwn_profile_distances_C.dist')
+            'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_low', 'D',
+                              '2019-08-14_06-06-38.037792_unifrac_btwn_profile_distances_D.dist')
         }
 
         # Paths to the cct specific distances at 0.40 with braycurtis
@@ -642,6 +642,8 @@ class RestrepoAnalysis:
                         if uid in self.between_sample_clade_dist_df_dict[clade].index.values.tolist():
                             self.between_sample_clade_dist_df_dict[clade].drop(index=uid, inplace=True, errors='ignore')
                             self.between_sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True, errors='ignore')
+                self.profile_abundance_df_cutoff_high.drop(index=uid, inplace=True, errors='ignore')
+                self.profile_abundance_df_cutoff_low.drop(index=uid, inplace=True, errors='ignore')
                 break
 
     def _del_problem_sample_from_a_df(self, df=None, list_of_dfs=None):
@@ -1065,7 +1067,7 @@ class RestrepoAnalysis:
                 self.between_sample_clade_dist_df_dict[clade] = df.astype(dtype='float')
             elif cct_specific:
                 if cct_specific == 'low':
-                    self.profile_distance_df_dict_cutoff_low = df.astype(dtype='float')
+                    self.profile_distance_df_dict_cutoff_low[clade] = df.astype(dtype='float')
                 else:
                     self.between_profile_clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
                     if cct_specific == '040':
@@ -1766,7 +1768,7 @@ class RestrepoAnalysis:
 
         apples = 'asdf'
 
-    def make_dendrogram_with_meta_all_clades(self):
+    def make_dendrogram_with_meta_all_clades(self, high_low=None):
         """This function will make a figure that has a dendrogram at the top, the labels under that, then
         under this it will have data that link the metainfo to each of the types found.
         NB, I have modified the returned dictionary from hierarchy_sp.dendrogram_sp so that it contains the
@@ -1793,19 +1795,41 @@ class RestrepoAnalysis:
         apples = 'asdf'
         # order: dendro, label, species, depth, reef_type, season
         widths = [12,26,7,6,3,3,2]
-        axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(widths)
+        axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(widths, high_low)
         for i in range(len(self.clades)):
-            self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr)
+            self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr, high_low)
         print('Saving image')
-        plt.savefig(os.path.join(self.figure_dir, f'dendro_figure_{self.profile_distance_method}_{self.cutoff_abund}.png'), dpi=1200)
-        plt.savefig(os.path.join(self.figure_dir, f'dendro_figure_{self.profile_distance_method}_{self.cutoff_abund}.svg'), dpi=1200)
+        if not high_low:
+            plt.savefig(os.path.join(self.figure_dir, f'dendro_figure_{self.profile_distance_method}_{self.cutoff_abund}.png'), dpi=1200)
+            plt.savefig(os.path.join(self.figure_dir, f'dendro_figure_{self.profile_distance_method}_{self.cutoff_abund}.svg'), dpi=1200)
+        else:
+            plt.savefig(
+                os.path.join(self.figure_dir, f'dendro_figure_{self.profile_distance_method}_{high_low}.png'),
+                dpi=1200)
+            plt.savefig(
+                os.path.join(self.figure_dir, f'dendro_figure_{self.profile_distance_method}_{high_low}.svg'),
+                dpi=1200)
 
-    def _make_dendrogram_with_meta_fig_for_all_clades(self, clade_index, axarr):
+    def _make_dendrogram_with_meta_fig_for_all_clades(self, clade_index, axarr, high_low):
+        if not high_low:
+            profile_abund_cutoff = self.profile_abundance_df_cutoff
+            between_profile_clade_dist_cct_specific_df_dict = self.between_profile_clade_dist_cct_specific_df_dict
+            prof_uid_to_local_abund_dict_post_cutoff = self.prof_uid_to_local_abund_dict_post_cutoff
+        elif high_low == 'high':
+            profile_abund_cutoff = self.profile_abundance_df_cutoff_high
+            between_profile_clade_dist_cct_specific_df_dict = self.profile_distance_df_dict_cutoff_high
+            prof_uid_to_local_abund_dict_post_cutoff = self.prof_uid_to_local_abund_dict_cutoff_high
+        else: # abund cuttoff == low
+            profile_abund_cutoff = self.profile_abundance_df_cutoff_low
+            between_profile_clade_dist_cct_specific_df_dict = self.profile_distance_df_dict_cutoff_low
+            prof_uid_to_local_abund_dict_post_cutoff = self.prof_uid_to_local_abund_dict_cutoff_low
+
+
         clade = self.clades[clade_index]
         # Plot the dendrogram in first axes
         dendro_info = self._make_dendrogram_figure(
-            clade=clade, ax=axarr[clade_index + 1][0], dist_df=self.between_profile_clade_dist_cct_specific_df_dict[clade],
-            local_abundance_dict=self.prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
+            clade=clade, ax=axarr[clade_index + 1][0], dist_df=between_profile_clade_dist_cct_specific_df_dict[clade],
+            local_abundance_dict=prof_uid_to_local_abund_dict_post_cutoff, plot_labels=False)
         if clade_index == 0:
             axarr[clade_index + 1][0].set_yticks([0.0, 1.0])
         else:
@@ -1839,7 +1863,8 @@ class RestrepoAnalysis:
         # to make the grey code its probably easiest to make an RGB tupple scaling from 255,255,255 which is
         # white, to 0,0,0 which is black. This would be scaled against the eveness.
 
-        profile_uid_to_sample_uid_list_dict = self._generate_profile_uid_to_sample_uid_list_dict()
+        profile_uid_to_sample_uid_list_dict = self._generate_profile_uid_to_sample_uid_list_dict(
+            profile_abund_cutoff_df=profile_abund_cutoff)
 
         # we will work with a class for doing the meta plotting as it will be quite involved
         mip = MetaInfoPlotter(parent_analysis=self, ordered_uid_list=ordered_prof_uid_list, meta_axarr=axarr[clade_index + 1][2:],
@@ -1851,19 +1876,19 @@ class RestrepoAnalysis:
         mip.plot_reef_type()
         mip.plot_season()
 
-    def _generate_profile_uid_to_sample_uid_list_dict(self, clade=None):
+    def _generate_profile_uid_to_sample_uid_list_dict(self, profile_abund_cutoff_df, clade=None):
 
         profile_uid_to_sample_uid_list_dict = defaultdict(list)
         if clade is None:
-            for prof_uid in list(self.profile_abundance_df_cutoff):
-                self._pop_prof_uid_to_smp_name_dd_list(prof_uid, profile_uid_to_sample_uid_list_dict)
+            for prof_uid in list(profile_abund_cutoff_df):
+                self._pop_prof_uid_to_smp_name_dd_list(prof_uid, profile_uid_to_sample_uid_list_dict, profile_abund_cutoff_df)
         else:
-            for prof_uid in [uid for uid in list(self.profile_abundance_df_cutoff) if clade.upper() in self.prof_uid_to_name_dict[uid]]:
-                self._pop_prof_uid_to_smp_name_dd_list(prof_uid, profile_uid_to_sample_uid_list_dict)
+            for prof_uid in [uid for uid in list(profile_abund_cutoff_df) if clade.upper() in self.prof_uid_to_name_dict[uid]]:
+                self._pop_prof_uid_to_smp_name_dd_list(prof_uid, profile_uid_to_sample_uid_list_dict, profile_abund_cutoff_df)
         return profile_uid_to_sample_uid_list_dict
 
-    def _pop_prof_uid_to_smp_name_dd_list(self, prof_uid, profile_uid_to_sample_uid_list_dict):
-        temp_series = self.profile_abundance_df_cutoff[prof_uid]
+    def _pop_prof_uid_to_smp_name_dd_list(self, prof_uid, profile_uid_to_sample_uid_list_dict, profile_abund_cutoff_df):
+        temp_series = profile_abund_cutoff_df[prof_uid]
         temp_series_non_zero_series = temp_series[temp_series > 0]
         non_zero_indices = temp_series_non_zero_series.index.values.tolist()
         profile_uid_to_sample_uid_list_dict[prof_uid].extend(non_zero_indices)
@@ -1960,9 +1985,9 @@ class RestrepoAnalysis:
     def _remove_spines_from_dendro(self, axarr, clade_index=None):
         if clade_index is not None:
             if clade_index == 0:
-                axarr[0].set_title('BrayCurtis distance', fontsize='x-small', fontweight='bold')
+                axarr[0].set_title('UniFrac distance', fontsize='x-small', fontweight='bold')
         else:
-            axarr[0].set_ylabel('BrayCurtis distance', fontsize='x-small', fontweight='bold')
+            axarr[0].set_ylabel('UniFrac distance', fontsize='x-small', fontweight='bold')
 
         axarr[0].spines['top'].set_visible(False)
         axarr[0].spines['bottom'].set_visible(False)
@@ -2039,16 +2064,25 @@ class RestrepoAnalysis:
                                    verticalalignment='center', fontsize='xx-small', fontweight='bold'))
         return annotation_list
 
-    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(self, list_of_widths):
+    def _setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(self, list_of_widths, high_low):
         # in order (sub-cat, clade A, clade C, clade D)
         # We will set the hiehgts of the genera plots in proportion to the number of types for each genus
         # in the cutoff df
+        if not high_low:
+            profile_abund_cutoff = self.profile_abundance_df_cutoff
+        elif high_low == 'high':
+            profile_abund_cutoff = self.profile_abundance_df_cutoff_high
+        else: # abund cuttoff == low
+            profile_abund_cutoff = self.profile_abundance_df_cutoff_low
+
         dd_clade_counter = defaultdict(int)
-        for uid in list(self.profile_abundance_df_cutoff):
+
+        for uid in list(profile_abund_cutoff):
             dd_clade_counter[self.profile_meta_info_df.loc[uid]['Clade']] += 1
+
         # this is set from the original hardcoded numbers we can always adjust if needs be
         total = 25+42+24
-        total_number_of_cutoff_profiles = len(list(self.profile_abundance_df_cutoff))
+        total_number_of_cutoff_profiles = len(list(profile_abund_cutoff))
         A_height = int((dd_clade_counter['A'] / total_number_of_cutoff_profiles) * total)
         C_height = int((dd_clade_counter['C'] / total_number_of_cutoff_profiles) * total)
         D_height = int((dd_clade_counter['D'] / total_number_of_cutoff_profiles) * total)
@@ -3154,8 +3188,8 @@ if __name__ == "__main__":
     # clade collection types that we can then generate distances from to make the dendrogram figure
     # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
     # cct_uid_string_005 and cct_uid_string_006
-    rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
-    # rest_analysis.make_dendrogram_with_meta_all_clades()
+    # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
+    rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
 
