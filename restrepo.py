@@ -118,7 +118,7 @@ class RestrepoAnalysis:
     """The class responsible for doing all python based analyses for the restrepo et al. 2019 paper.
     NB although we see clade F in the dataset this is minimal and so we will
     tackle this sepeately to the analysis of the A, C and D."""
-    def __init__(self, cutoff_abund, seq_distance_method='unifrac', profile_distance_method='unifrac', ignore_cache=False, remove_se=False, maj_only=False):
+    def __init__(self, cutoff_abund, seq_distance_method='unifrac', profile_distance_method='unifrac', ignore_cache=False, remove_se=False, maj_only=False, remove_se_clade_props=False):
         # root_dir is the root dir of the git repo
         self.root_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -160,6 +160,9 @@ class RestrepoAnalysis:
         # whether to only include only samples into a given clades distance matrix that have
         # that clade as their majoirty
         self.maj_only=maj_only
+        # whether to produce the between sample calde proportion dfs with the s. hystrix samples removed
+        # along with the paried info df that will be used in R to conduct a permanova
+        self.remove_se_clade_props = remove_se_clade_props
 
         self.clades = list('ACD')
         self.clade_genera_labels = ['Symbiodinium', 'Cladocopium', 'Durisdinium']
@@ -226,6 +229,29 @@ class RestrepoAnalysis:
         self.profile_abundance_df_cutoff = None
         self.create_profile_df_with_cutoff()
 
+        # TODO we want to move towards having two ITS2 type profile schematics with hard coded cutoffs
+        # The first will be >0.40 and the second will be >0.05 and <0.40. We will move away from having
+        # specific distance outputs for these clade collection types and rather use the profile distances
+        # that we have from the main output (i.e. containing all types). We will simply pull out the
+        # distances for the types that we need by getting rid of those types that are not represented in the
+        # lower or higher collection of sample-ITS2 type profile abundances.
+
+        # The simplest way to do this will be to calculate the df of abundance first and then the distance matrix that
+        # goes with it and then pass this pairing into the schematic making code.
+        self.profile_abundance_df_cutoff_high = None
+        self.prof_uid_to_local_abund_dict_cutoff_high = {}
+        self.profile_distance_df_dict_cutoff_high = None
+        self._create_profile_df_with_cutoff_high_low(cutoff_low=0.40)
+        self._populate_clade_dist_df_dict(cct_specific='040')
+        # TODO we need to get the tup list and create the specific cct distances for the 0.05-0.40 distances
+        self.profile_abundance_df_cutoff_low = None
+        self.prof_uid_to_local_abund_dict_cutoff_low = {}
+        self.profile_distance_df_dict_cutoff_low = None
+        self._create_profile_df_with_cutoff_high_low(cutoff_low=0.05, cutoff_high=0.40)
+        self.get_list_of_clade_col_type_uids_for_unifrac(high_low='low')
+        self._populate_clade_dist_df_dict(cct_specific='low')
+        # here we should have all of the items that we'll want to be passing into the dendrogram figure
+
 
         # Temperature dataframe
         self.temperature_df = None
@@ -254,6 +280,9 @@ class RestrepoAnalysis:
         self._create_clade_prop_distances()
         self.clade_proportion_df_non_normalised = self.clade_proportion_df_non_normalised.astype(float)
 
+        if self.remove_se_clade_props:
+            self._output_clade_prop_df_no_se()
+
         # info dictionaries
         self.old_color_dict = {
             'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
@@ -272,6 +301,25 @@ class RestrepoAnalysis:
 
         self._del_propblem_sample()
 
+    def _create_profile_distance_dict_per_clade_cutoff_high_low(self, profile_abundance_df, high_low):
+        """This should load in the """
+
+        for clade in self.clades:
+            # Uids of abundance dict
+            prof_uids_to_drop = set([ind for ind in profile_abundance_df.index if self.profile_meta_info_df[ind, 'Clade'] == clade]) ^ set(self.between_profile_clade_dist_df_dict[clade].index.values.tolist())
+            prof_dists_clade_df = self.between_profile_clade_dist_df_dict[clade].copy()
+            prof_dists_clade_df = prof_dists_clade_df.drop(prof_uids_to_drop, axis=1).drop(prof_uids_to_drop, axis=0)
+
+    def _output_clade_prop_df_no_se(self):
+        clade_prop_df_no_se = self._remove_se_from_df(self.between_sample_clade_proportion_distances_df)
+        output_path_dist_matrix = os.path.join(self.outputs_dir,
+                                               f'between_sample_clade_proportion_distances_no_se.csv')
+        clade_prop_df_no_se.to_csv(path_or_buf=output_path_dist_matrix, sep=',', header=False, index=False,
+                                   line_terminator='\n')
+        meta_info_df_for_clade = self.experimental_metadata_info_df.loc[clade_prop_df_no_se.index.values.tolist(), :]
+        output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_for_clade_proportion_permanova_no_se.csv')
+        meta_info_df_for_clade.to_csv(path_or_buf=output_path_meta_info, sep=',', header=True, index=False,
+                                      line_terminator='\n')
 
     def _init_sp_output_paths(self):
 
@@ -304,6 +352,16 @@ class RestrepoAnalysis:
             'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'A', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_A.dist'),
             'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'C', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_C.dist'),
             'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'D', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_D.dist')
+        }
+
+        # Paths to the cct specific distances at abundances between 0.05 and 0.40 unifrac
+        self.between_profile_clade_dist_cct_low_unifrac_specific_path_dict = {
+            'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_low', 'A',
+                              '2019-08-14_06-06-38.037792_unifrac_btwn_profile_distances_C.dist'),
+            'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_low', 'C',
+                              '2019-08-14_06-06-38.037792_unifrac_btwn_profile_distances_C.dist'),
+            'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_low', 'D',
+                              '2019-08-14_06-06-38.037792_unifrac_btwn_profile_distances_C.dist')
         }
 
         # Paths to the cct specific distances at 0.40 with braycurtis
@@ -941,9 +999,20 @@ class RestrepoAnalysis:
             if smp_dist:
                 self.between_sample_clade_dist_df_dict = pickle.load(
                     file=open(os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}.p'), 'rb'))
-            if cct_specific:
-                self.between_profile_clade_dist_cct_specific_df_dict = pickle.load(
-                    file=open(os.path.join(self.cache_dir, f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'), 'rb'))
+            elif cct_specific:
+                if cct_specific == 'low':
+                    self.profile_distance_df_dict_cutoff_low = pickle.load(
+                        file=open(os.path.join(self.cache_dir,
+                                               f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'),
+                                  'rb'))
+                else:
+                    if cct_specific == '040':
+                        self.profile_distance_df_dict_cutoff_high = pickle.load(
+                            file=open(os.path.join(self.cache_dir,
+                                                   f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'),
+                                      'rb'))
+                    self.between_profile_clade_dist_cct_specific_df_dict = pickle.load(
+                        file=open(os.path.join(self.cache_dir, f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'), 'rb'))
             else:
                 self.between_profile_clade_dist_df_dict = pickle.load(file=open(os.path.join(self.cache_dir, f'profile_clade_dist_df_dict_{self.profile_distance_method}.p'), 'rb'))
         except FileNotFoundError:
@@ -958,6 +1027,9 @@ class RestrepoAnalysis:
                 path_dict_to_use = self.between_sample_clade_dist_path_dict_braycurtis
             elif self.seq_distance_method == 'unifrac':
                 path_dict_to_use = self.between_sample_clade_dist_path_dict_unifrac
+        elif cct_specific == 'low':
+            path_dict_to_use = self.between_profile_clade_dist_cct_low_unifrac_specific_path_dict
+
         elif cct_specific == '005':
             if self.profile_distance_method == 'braycurtis':
                 path_dict_to_use = self.between_profile_clade_dist_cct_005_braycurtis_specific_path_dict
@@ -992,7 +1064,12 @@ class RestrepoAnalysis:
             if smp_dist:
                 self.between_sample_clade_dist_df_dict[clade] = df.astype(dtype='float')
             elif cct_specific:
-                self.between_profile_clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
+                if cct_specific == 'low':
+                    self.profile_distance_df_dict_cutoff_low = df.astype(dtype='float')
+                else:
+                    self.between_profile_clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
+                    if cct_specific == '040':
+                        self.profile_distance_df_dict_cutoff_high[clade] = df.astype(dtype='float')
             else:
                 self.between_profile_clade_dist_df_dict[clade] = df.astype(dtype='float')
 
@@ -1001,8 +1078,14 @@ class RestrepoAnalysis:
             pickle.dump(obj=self.between_sample_clade_dist_df_dict,
                         file=open(os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}.p'), 'wb'))
         elif cct_specific:
-            pickle.dump(obj=self.between_profile_clade_dist_cct_specific_df_dict,
-                        file=open(os.path.join(self.cache_dir, f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'), 'wb'))
+            if cct_specific == 'low':
+                pickle.dump(obj=self.profile_distance_df_dict_cutoff_low,
+                            file=open(os.path.join(self.cache_dir,
+                                                   f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'),
+                                      'wb'))
+            else:
+                pickle.dump(obj=self.between_profile_clade_dist_cct_specific_df_dict,
+                            file=open(os.path.join(self.cache_dir, f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'), 'wb'))
         else:
             pickle.dump(obj=self.between_profile_clade_dist_df_dict, file=open(os.path.join(self.cache_dir, f'profile_clade_dist_df_dict_{self.profile_distance_method}.p'), 'wb'))
 
@@ -2182,8 +2265,7 @@ class RestrepoAnalysis:
             self.profile_abundance_df_cutoff = pickle.load(open(os.path.join(self.cache_dir, f'prof_df_cutoff_{cutoff_abund_str}.p'), 'rb'))
             self.prof_uid_to_local_abund_dict_post_cutoff = pickle.load(open(os.path.join(self.cache_dir, f'prof_uid_to_local_abund_dict_post_cutoff_{cutoff_abund_str}.p'), 'rb'))
         else:
-            num_profs_pre_cutoff = len(list(self.profile_abundance_df))
-            print(f'There are {num_profs_pre_cutoff} ITS2 type profiles before applying cutoff of {self.cutoff_abund}')
+            num_profs_pre_cutoff = self._report_profiles_before_cutoff()
             # make new df from copy of old df
             self.profile_abundance_df_cutoff = self.profile_abundance_df.copy()
             # change values below cutoff to 0
@@ -2193,24 +2275,7 @@ class RestrepoAnalysis:
             # now check to see if there are any type profiles that no longer have associations
             # https://stackoverflow.com/questions/21164910/how-do-i-delete-a-column-that-contains-only-zeros-in-pandas
             self.profile_abundance_df_cutoff = self.profile_abundance_df_cutoff.loc[:, (self.profile_abundance_df_cutoff != 0).any(axis=0)]
-            num_profs_post_cutoff = len(list(self.profile_abundance_df_cutoff))
-            print(f'There are {num_profs_post_cutoff} after.')
-            num_profs_removed = num_profs_pre_cutoff - num_profs_post_cutoff
-            print(f'{num_profs_removed} ITS2 type profiles have been removed from the dataframe.')
-            # get list of names of profiles removed due to cutoff
-            profs_removed = [self.prof_uid_to_name_dict[uid] for uid in
-                             list(self.profile_abundance_df) if
-                             uid not in list(self.profile_abundance_df_cutoff)]
-            print('These profiles were:')
-            for prof in profs_removed:
-                print(prof)
-
-            # calculate how many unique DataSetSample to ITS2 type profile associations there are.
-            num_associations_pre_cutoff = len(list(self.profile_abundance_df[self.profile_abundance_df > 0].stack().index))
-            num_associations_post_cutoff = len(list(self.profile_abundance_df_cutoff[self.profile_abundance_df_cutoff > 0].stack().index))
-            print(f'The number of unique DataSetSample to ITS2 type profile associations was {num_associations_pre_cutoff}.')
-            print(f'The number of unique DataSetSample to ITS2 type profile associations '
-                  f'after cutoff is {num_associations_post_cutoff}')
+            self._report_profiles_after_cutoff(num_profs_pre_cutoff)
 
             # now populate the new prof_uid_to_local_abund_dict_post_cutoff dictionary
             for i in list(self.profile_abundance_df_cutoff):  # for each column of the df
@@ -2222,7 +2287,115 @@ class RestrepoAnalysis:
             pickle.dump(self.profile_abundance_df_cutoff, open(os.path.join(self.cache_dir, f'prof_df_cutoff_{cutoff_abund_str}.p'), 'wb'))
             pickle.dump(self.prof_uid_to_local_abund_dict_post_cutoff, open(os.path.join(self.cache_dir, f'prof_uid_to_local_abund_dict_post_cutoff_{cutoff_abund_str}.p'), 'wb'))
 
-    def get_list_of_clade_col_type_uids_for_unifrac(self):
+    def _create_profile_df_with_cutoff_high_low(self, cutoff_low, cutoff_high=None):
+        """Creates a new df from the old df that has all of the values below the cutoff_abundance threshold
+        made to 0. We will also calculate a new prof_uid_to_local_abund_dict_post_cutoff dictionary.
+        """
+        if cutoff_high:# we are making the lower associations set
+            if os.path.exists(os.path.join(self.cache_dir, 'profile_df_cutoff_low.p')):
+                self.profile_abundance_df_cutoff_low = pickle.load(open(os.path.join(self.cache_dir, 'profile_df_cutoff_low.p'), 'rb'))
+                self.prof_uid_to_local_abund_dict_cutoff_low = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_cutoff_low.p'), 'rb'))
+            else:
+                self._create_prof_abund_high_low_from_scratch_and_pickle_out(cutoff_high, cutoff_low)
+        else: # we are making the higher associations set
+            if os.path.exists(os.path.join(self.cache_dir, 'profile_df_cutoff_high.p')):
+                self.profile_abundance_df_cutoff_high = pickle.load(open(os.path.join(self.cache_dir, 'profile_df_cutoff_high.p'), 'rb'))
+                self.prof_uid_to_local_abund_dict_cutoff_high = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_cutoff_high.p'), 'rb'))
+            else:
+                self._create_prof_abund_high_low_from_scratch_and_pickle_out(cutoff_high, cutoff_low)
+
+
+
+    def _create_prof_abund_high_low_from_scratch_and_pickle_out(self, cutoff_high, cutoff_low):
+        num_profs_pre_cutoff = self._report_profiles_before_cutoff()
+        # make new df from copy of old df
+        profile_abundance_df_cutoff = self.profile_abundance_df.copy()
+        profile_abundance_df_cutoff = self._mask_values_and_remove_0_cols(cutoff_high, cutoff_low, profile_abundance_df_cutoff)
+        self._report_profiles_after_cutoff_high_low(num_profs_pre_cutoff, profile_abundance_df_cutoff)
+        # now populate the new prof_uid_to_local_abund_dict_post_cutoff dictionary
+        for i in list(profile_abundance_df_cutoff):  # for each column of the df
+            temp_series = profile_abundance_df_cutoff[i]
+            local_count = len(temp_series[temp_series > 0].index.values.tolist())
+            if cutoff_high:
+                self.prof_uid_to_local_abund_dict_cutoff_low[i] = local_count
+            else:
+                self.prof_uid_to_local_abund_dict_cutoff_high[i] = local_count
+        # dump
+        if cutoff_high:
+            self.profile_abundance_df_cutoff_low = profile_abundance_df_cutoff
+            pickle.dump(self.profile_abundance_df_cutoff_low,
+                        open(os.path.join(self.cache_dir, 'profile_df_cutoff_low.p'), 'wb'))
+            pickle.dump(self.prof_uid_to_local_abund_dict_cutoff_low,
+                        open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_cutoff_low.p'), 'wb'))
+        else:
+            self.profile_abundance_df_cutoff_high = profile_abundance_df_cutoff
+            pickle.dump(self.profile_abundance_df_cutoff_high,
+                        open(os.path.join(self.cache_dir, 'profile_df_cutoff_high.p'), 'wb'))
+            pickle.dump(self.prof_uid_to_local_abund_dict_cutoff_high,
+                        open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_cutoff_high.p'), 'wb'))
+
+    def _report_profiles_after_cutoff(self, num_profs_pre_cutoff):
+        num_profs_post_cutoff = len(list(self.profile_abundance_df_cutoff))
+        print(f'There are {num_profs_post_cutoff} after.')
+        num_profs_removed = num_profs_pre_cutoff - num_profs_post_cutoff
+        print(f'{num_profs_removed} ITS2 type profiles have been removed from the dataframe.')
+        # get list of names of profiles removed due to cutoff
+        profs_removed = [self.prof_uid_to_name_dict[uid] for uid in
+                         list(self.profile_abundance_df) if
+                         uid not in list(self.profile_abundance_df_cutoff)]
+        print('These profiles were:')
+        for prof in profs_removed:
+            print(prof)
+        # calculate how many unique DataSetSample to ITS2 type profile associations there are.
+        num_associations_pre_cutoff = len(list(self.profile_abundance_df[self.profile_abundance_df > 0].stack().index))
+        num_associations_post_cutoff = len(
+            list(self.profile_abundance_df_cutoff[self.profile_abundance_df_cutoff > 0].stack().index))
+        print(
+            f'The number of unique DataSetSample to ITS2 type profile associations was {num_associations_pre_cutoff}.')
+        print(f'The number of unique DataSetSample to ITS2 type profile associations '
+              f'after cutoff is {num_associations_post_cutoff}')
+
+    def _report_profiles_after_cutoff_high_low(self, num_profs_pre_cutoff, new_abund_df):
+        num_profs_post_cutoff = len(list(new_abund_df))
+        print(f'There are {num_profs_post_cutoff} after.')
+        num_profs_removed = num_profs_pre_cutoff - num_profs_post_cutoff
+        print(f'{num_profs_removed} ITS2 type profiles have been removed from the dataframe.')
+        # get list of names of profiles removed due to cutoff
+        profs_removed = [self.prof_uid_to_name_dict[uid] for uid in
+                         list(self.profile_abundance_df) if
+                         uid not in list(new_abund_df)]
+        print('These profiles were:')
+        for prof in profs_removed:
+            print(prof)
+        # calculate how many unique DataSetSample to ITS2 type profile associations there are.
+        num_associations_pre_cutoff = len(
+            list(self.profile_abundance_df[self.profile_abundance_df > 0].stack().index))
+        num_associations_post_cutoff = len(
+            list(new_abund_df[new_abund_df > 0].stack().index))
+        print(
+            f'The number of unique DataSetSample to ITS2 type profile associations was {num_associations_pre_cutoff}.')
+        print(f'The number of unique DataSetSample to ITS2 type profile associations '
+              f'after cutoff is {num_associations_post_cutoff}')
+
+    def _report_profiles_before_cutoff(self):
+        num_profs_pre_cutoff = len(list(self.profile_abundance_df))
+        print(f'There are {num_profs_pre_cutoff} ITS2 type profiles before applying cutoff(s).')
+        return num_profs_pre_cutoff
+
+    def _mask_values_and_remove_0_cols(self, cutoff_high, cutoff_low, profile_abundance_df_cutoff):
+        # change values below cutoff to 0
+        profile_abundance_df_cutoff = profile_abundance_df_cutoff.mask(
+            cond=profile_abundance_df_cutoff <= cutoff_low, other=0)
+        if cutoff_high:
+            profile_abundance_df_cutoff = profile_abundance_df_cutoff.mask(
+                cond=profile_abundance_df_cutoff > cutoff_high, other=0)
+        # now drop columns with 0
+        # now check to see if there are any type profiles that no longer have associations
+        # https://stackoverflow.com/questions/21164910/how-do-i-delete-a-column-that-contains-only-zeros-in-pandas
+        return profile_abundance_df_cutoff.loc[:,
+                                      (profile_abundance_df_cutoff != 0).any(axis=0)]
+
+    def get_list_of_clade_col_type_uids_for_unifrac(self, high_low=None):
         """ This is code for getting tuples of (DataSetSample uid, AnalysisType uid).
         These tuples can then be used to get a list of CladeCollectionType uids from the SymPortal terminal.
         This list of clade collection type uids can then be fed in to the new distance outputs that we are writing
@@ -2252,12 +2425,21 @@ class RestrepoAnalysis:
         # into the distance functions of SymPortal that we are going to make.
         # we should make seperate outputs for bray vs unifrac, unifrac sqrt trans formed and not.
 
-        # https://stackoverflow.com/questions/26854091/getting-index-column-pairs-for-true-elements-of-a-boolean-dataframe-in-pandas
-        index_column_tups = list(self.profile_abundance_df_cutoff[self.profile_abundance_df_cutoff > 0].stack().index)
-        if self.cutoff_abund == 0.05:
-            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_005')
-        else: #  0.40
-            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_040')
+        if high_low == 'low':
+            ### Then we are getting the tups specifically for the set of profiles that are within 0.05 and 0.40 abundance
+            index_column_tups = list(
+                self.profile_abundance_df_cutoff_low[self.profile_abundance_df_cutoff_low > 0].stack().index)
+
+            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_low')
+
+        else:
+            # Then we are doing this for the older 0.05 or 0.40 cutoffs.
+            # https://stackoverflow.com/questions/26854091/getting-index-column-pairs-for-true-elements-of-a-boolean-dataframe-in-pandas
+            index_column_tups = list(self.profile_abundance_df_cutoff[self.profile_abundance_df_cutoff > 0].stack().index)
+            if self.cutoff_abund == 0.05:
+                uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_005')
+            else: #  0.40
+                uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_040')
 
         with open(uid_pairs_for_ccts_path, 'w') as f:
             for tup in index_column_tups:
@@ -2420,7 +2602,7 @@ class RestrepoAnalysis:
         return dropped_df
 
     def _remove_se_from_df(self, clade_sample_dist_df):
-        # remove the samples uids from the dist matrix that do not have the clade in question as their maj
+        # remove the samples uids from the dist matrix that are of the species S. hystrix
         uids_to_remove = []
         for uid in clade_sample_dist_df.index:
             if self.experimental_metadata_info_df.at[uid, 'species'] == "SE":
@@ -2590,6 +2772,8 @@ class RestrepoAnalysis:
         """This method will be used to investigate the pairwise comparisons that have shown significant
         PERMDISP test results. It will look at how balanced the factors are and what the dispersion looks like"""
 
+        self._assess_balance_and_variance_clade_prop()
+
         # we will strip the between sample matrices of non-maj samples if self.maj_only is true before assessing
         # variances as below
         if self.maj_only:
@@ -2607,6 +2791,7 @@ class RestrepoAnalysis:
                 print(f'{factor} balance ratios are: {output_str}')
         foo = 'asdf'
 
+
         # now we look at the variance ratios between the pairwise group comparisons
         # for every clade and factor combo
         for clade in self.clades:
@@ -2615,75 +2800,168 @@ class RestrepoAnalysis:
 
                 print(f'\nExaminging variance ratios for factor {factor}')
                 factor_counter_dd, max_val = self._populate_factor_counter_and_get_max_val(clade, factor)
-                if clade == 'D':
-                    if factor == 'species':
-                        foo = 'basr'
-                # for each group that is in factor get a list of the distances and hold it in dd
-                # this dict will have a key for every group in the factor that is present in the clade distance matrix
-                # for each key there will be a value that is a list of the interpoint distances for only the samples
-                # that are of the given group. We will calculate the variance of these points
-                inter_point_dist_per_group_of_factor_dd = defaultdict(list)
 
-                # This dictionary will hold the results of the variance calculation from the dd above.
-                # As such it will be group as key and variance as value
-                variance_per_group_of_factor_dict = dict()
+                variance_per_group_of_factor_dict = self._make_group_variance_dict(clade, factor, factor_counter_dd)
 
-                for group in factor_counter_dd:
-                    # for each sample uid in the btwn sample dist matrix
-                    # if the sample is of the group
-                    # then add this uid to list
-                    smp_uids_of_group = []
-                    for smp_uid in self.between_sample_clade_dist_df_dict[clade].index:
-                        if self.experimental_metadata_info_df.at[smp_uid, factor] == group:
-                            smp_uids_of_group.append(smp_uid)
-                    # now go pairwise for each uid in the list and populate
-                    for uid_1, uid_2 in itertools.combinations(smp_uids_of_group, 2):
-                        inter_point_dist_per_group_of_factor_dd[group].append(self.between_sample_clade_dist_df_dict[clade].at[uid_1, uid_2])
+                pw_var_ratio_dict = self._make_pw_variance_ratio_dict(factor_counter_dd,
+                                                                      variance_per_group_of_factor_dict)
 
-                    # Now to the variance calculation
-                    try:
-                        variance_per_group_of_factor_dict[group] = variance(inter_point_dist_per_group_of_factor_dd[group])
-                    except statistics.StatisticsError:
-                        variance_per_group_of_factor_dict[group] = 0
-                # now that we have the interpoint distances for each of the groups for the factor
-                # we can now do the pairwise comparisons between the groups of the factors to workout variance ratios
-                # For each of the ratio calculations we will always make sure to but the less abundant
-                # group as the numerator and the more abundant as the denominator.
-                # This way we can look for positive values of the variance ratios as a sign that something is not good
-                # I.e. this will show us that despite being less abundant a group has a bigger dispersion than a more
-                # abundant group.
-
-                pw_var_ratio_dict = {}
-                for group_1, group_2 in itertools.combinations(variance_per_group_of_factor_dict, 2):
-                    if factor_counter_dd[group_1] > factor_counter_dd[group_2]:
-                        pw_var_ratio_dict[frozenset({group_1, group_2})] = variance_per_group_of_factor_dict[group_2]/variance_per_group_of_factor_dict[group_1]
-                    else:
-                        pw_var_ratio_dict[frozenset({group_1, group_2})] = variance_per_group_of_factor_dict[group_1]/variance_per_group_of_factor_dict[group_2]
-
-                # now we can create a dataframe of the values
-                fixed_list_groups = list(variance_per_group_of_factor_dict.keys())
-                df = pd.DataFrame(columns=fixed_list_groups, index=fixed_list_groups)
-                for outer_group in fixed_list_groups:
-                    for inner_group in fixed_list_groups:
-                        if outer_group == inner_group:
-                            df.at[outer_group, inner_group] = 1
-                        else:
-                            var_ratio = pw_var_ratio_dict[frozenset({outer_group, inner_group})]
-                            abund_ratio = factor_counter_dd[outer_group]/factor_counter_dd[inner_group]
-                            bad_abund=False
-                            if abund_ratio > 2 or abund_ratio < 0.5:
-                                bad_abund=True
-                            df.at[outer_group, inner_group] = var_ratio
-                            if var_ratio > 1 and bad_abund:
-                                print(f'Clade {clade}, factor {factor}, combo {outer_group}_{inner_group} is bad. Var ratio was {var_ratio}. Abund ratio was {abund_ratio}.')
-
+                self._report_bad_values_and_create_pw_df(clade, factor, factor_counter_dd, pw_var_ratio_dict,
+                                                         variance_per_group_of_factor_dict)
 
                 foo = 'bar'
+            foo = 'bar'
 
+    def _assess_balance_and_variance_clade_prop(self):
+        # now assess the balance of the clade proportions
+        print('\n\nNow assessing balance of clade proportion matrix')
+        for factor in list(self.experimental_metadata_info_df):
+            print(f'\nExaminging balanace for factor {factor}')
+            factor_counter_dd, max_val = self._populate_factor_counter_and_get_max_val_clade_prop(factor)
+            output_str = ''
+            for dd_k, dd_v in factor_counter_dd.items():
+                output_str += f'{dd_k}: {dd_v / max_val}; '
+            print(f'{factor} balance ratios are: {output_str}')
+        # now look at variance ratios for the clade proportion
+        for factor in list(self.experimental_metadata_info_df):
+            print(f'\nExaminging variance ratios for factor {factor}')
+            factor_counter_dd, max_val = self._populate_factor_counter_and_get_max_val_clade_prop(factor)
+
+            variance_per_group_of_factor_dict = self._make_group_variance_dict_clade_prop(factor, factor_counter_dd)
+
+            pw_var_ratio_dict = self._make_pw_variance_ratio_dict(factor_counter_dd,
+                                                                  variance_per_group_of_factor_dict)
+
+            self._report_bad_values_and_create_pw_df_clade_prop(factor, factor_counter_dd, pw_var_ratio_dict,
+                                                                variance_per_group_of_factor_dict)
+
+    def _report_bad_values_and_create_pw_df(self, clade, factor, factor_counter_dd, pw_var_ratio_dict,
+                                            variance_per_group_of_factor_dict):
+        # now we can create a dataframe of the values
+        fixed_list_groups = list(variance_per_group_of_factor_dict.keys())
+        df = pd.DataFrame(columns=fixed_list_groups, index=fixed_list_groups)
+        for outer_group in fixed_list_groups:
+            for inner_group in fixed_list_groups:
+                if outer_group == inner_group:
+                    df.at[outer_group, inner_group] = 1
+                else:
+                    var_ratio = pw_var_ratio_dict[frozenset({outer_group, inner_group})]
+                    abund_ratio = factor_counter_dd[outer_group] / factor_counter_dd[inner_group]
+                    bad_abund = False
+                    if abund_ratio > 2 or abund_ratio < 0.5:
+                        bad_abund = True
+                    df.at[outer_group, inner_group] = var_ratio
+                    if var_ratio > 1 and bad_abund:
+                        print(
+                            f'Clade {clade}, factor {factor}, combo {outer_group}_{inner_group} is bad. Var ratio was {var_ratio}. Abund ratio was {abund_ratio}.')
+
+    def _report_bad_values_and_create_pw_df_clade_prop(self, factor, factor_counter_dd, pw_var_ratio_dict,
+                                            variance_per_group_of_factor_dict):
+        # now we can create a dataframe of the values
+        fixed_list_groups = list(variance_per_group_of_factor_dict.keys())
+        df = pd.DataFrame(columns=fixed_list_groups, index=fixed_list_groups)
+        for outer_group in fixed_list_groups:
+            for inner_group in fixed_list_groups:
+                if outer_group == inner_group:
+                    df.at[outer_group, inner_group] = 1
+                else:
+                    var_ratio = pw_var_ratio_dict[frozenset({outer_group, inner_group})]
+                    abund_ratio = factor_counter_dd[outer_group] / factor_counter_dd[inner_group]
+                    bad_abund = False
+                    if abund_ratio > 2 or abund_ratio < 0.5:
+                        bad_abund = True
+                    df.at[outer_group, inner_group] = var_ratio
+                    if var_ratio > 1 and bad_abund:
+                        print(
+                            f'Factor {factor}, combo {outer_group}_{inner_group} is bad. Var ratio was {var_ratio}. Abund ratio was {abund_ratio}.')
+
+    def _make_pw_variance_ratio_dict(self, factor_counter_dd, variance_per_group_of_factor_dict):
+        # now that we have the interpoint distances for each of the groups for the factor
+        # we can now do the pairwise comparisons between the groups of the factors to workout variance ratios
+        # For each of the ratio calculations we will always make sure to but the less abundant
+        # group as the numerator and the more abundant as the denominator.
+        # This way we can look for positive values of the variance ratios as a sign that something is not good
+        # I.e. this will show us that despite being less abundant a group has a bigger dispersion than a more
+        # abundant group.
+        pw_var_ratio_dict = {}
+        for group_1, group_2 in itertools.combinations(variance_per_group_of_factor_dict, 2):
+            if factor_counter_dd[group_1] > factor_counter_dd[group_2]:
+                pw_var_ratio_dict[frozenset({group_1, group_2})] = variance_per_group_of_factor_dict[group_2] / \
+                                                                   variance_per_group_of_factor_dict[group_1]
+            else:
+                pw_var_ratio_dict[frozenset({group_1, group_2})] = variance_per_group_of_factor_dict[group_1] / \
+                                                                   variance_per_group_of_factor_dict[group_2]
+        return pw_var_ratio_dict
+
+    def _make_group_variance_dict(self, clade, factor, factor_counter_dd):
+        # for each group that is in factor get a list of the distances and hold it in dd
+        # this dict will have a key for every group in the factor that is present in the clade distance matrix
+        # for each key there will be a value that is a list of the interpoint distances for only the samples
+        # that are of the given group. We will calculate the variance of these points
+        inter_point_dist_per_group_of_factor_dd = defaultdict(list)
+        # This dictionary will hold the results of the variance calculation from the dd above.
+        # As such it will be group as key and variance as value
+        variance_per_group_of_factor_dict = dict()
+        for group in factor_counter_dd:
+            # for each sample uid in the btwn sample dist matrix
+            # if the sample is of the group
+            # then add this uid to list
+            smp_uids_of_group = []
+            for smp_uid in self.between_sample_clade_dist_df_dict[clade].index:
+                if self.experimental_metadata_info_df.at[smp_uid, factor] == group:
+                    smp_uids_of_group.append(smp_uid)
+            # now go pairwise for each uid in the list and populate
+            for uid_1, uid_2 in itertools.combinations(smp_uids_of_group, 2):
+                inter_point_dist_per_group_of_factor_dd[group].append(
+                    self.between_sample_clade_dist_df_dict[clade].at[uid_1, uid_2])
+
+            # Now to the variance calculation
+            try:
+                variance_per_group_of_factor_dict[group] = variance(inter_point_dist_per_group_of_factor_dd[group])
+            except statistics.StatisticsError:
+                variance_per_group_of_factor_dict[group] = 0
+        return variance_per_group_of_factor_dict
+
+    def _make_group_variance_dict_clade_prop(self, factor, factor_counter_dd):
+        # for each group that is in factor get a list of the distances and hold it in dd
+        # this dict will have a key for every group in the factor that is present in the clade distance matrix
+        # for each key there will be a value that is a list of the interpoint distances for only the samples
+        # that are of the given group. We will calculate the variance of these points
+        inter_point_dist_per_group_of_factor_dd = defaultdict(list)
+        # This dictionary will hold the results of the variance calculation from the dd above.
+        # As such it will be group as key and variance as value
+        variance_per_group_of_factor_dict = dict()
+        for group in factor_counter_dd:
+            # for each sample uid in the btwn sample dist matrix
+            # if the sample is of the group
+            # then add this uid to list
+            smp_uids_of_group = []
+            for smp_uid in self.between_sample_clade_proportion_distances_df.index:
+                if self.experimental_metadata_info_df.at[smp_uid, factor] == group:
+                    smp_uids_of_group.append(smp_uid)
+            # now go pairwise for each uid in the list and populate
+            for uid_1, uid_2 in itertools.combinations(smp_uids_of_group, 2):
+                inter_point_dist_per_group_of_factor_dd[group].append(
+                    self.between_sample_clade_proportion_distances_df.at[uid_1, uid_2])
+
+            # Now to the variance calculation
+            try:
+                variance_per_group_of_factor_dict[group] = variance(inter_point_dist_per_group_of_factor_dd[group])
+            except statistics.StatisticsError:
+                variance_per_group_of_factor_dict[group] = 0
+        return variance_per_group_of_factor_dict
 
     def _populate_factor_counter_and_get_max_val(self, clade, factor):
         factor_counter_dd = defaultdict(int)
         for smp_ind in self.between_sample_clade_dist_df_dict[clade].index:
+            factor_counter_dd[self.experimental_metadata_info_df.at[smp_ind, factor]] += 1
+        # here we have the factor counter populated
+        max_val = max(factor_counter_dd.values())
+        return factor_counter_dd, max_val
+
+    def _populate_factor_counter_and_get_max_val_clade_prop(self, factor):
+        factor_counter_dd = defaultdict(int)
+        for smp_ind in self.between_sample_clade_proportion_distances_df.index:
             factor_counter_dd[self.experimental_metadata_info_df.at[smp_ind, factor]] += 1
         # here we have the factor counter populated
         max_val = max(factor_counter_dd.values())
@@ -2865,7 +3143,7 @@ class MetaInfoPlotter:
 
 
 if __name__ == "__main__":
-    rest_analysis = RestrepoAnalysis(cutoff_abund=0.40, remove_se=True, maj_only=True)
+    rest_analysis = RestrepoAnalysis(cutoff_abund=0.40, remove_se=True, maj_only=True, remove_se_clade_props=True)
     # When we ran the analysis of variance ratios within the context of the between sample distance permanova analysis
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
@@ -2876,9 +3154,9 @@ if __name__ == "__main__":
     # clade collection types that we can then generate distances from to make the dendrogram figure
     # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
     # cct_uid_string_005 and cct_uid_string_006
-    # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
+    rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     # rest_analysis.make_dendrogram_with_meta_all_clades()
-    rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
+    # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
 
     # rest_analysis.plot_pcoa_of_cladal()
@@ -2889,7 +3167,6 @@ if __name__ == "__main__":
     # rest_analysis.permute_sample_permanova(dist_method='unifrac')
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_profile_permanova()
-
     # rest_analysis.histogram_of_all_abundance_values()
 
 
