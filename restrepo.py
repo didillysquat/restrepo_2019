@@ -301,6 +301,95 @@ class RestrepoAnalysis:
 
         self._del_propblem_sample()
 
+    def report_on_fidelity_proxies_for_profile_associations(self):
+        """Report the stats for the two its2 type profile schematics. Looks at how many types for each of the
+        schematics, the number of associations represented. And then report on the average number of different
+        groups per profile per factor."""
+
+        # stats for pre-cutoff
+        num_of_profiles_pre_cutoff = len(list(self.profile_abundance_df))
+        num_associations_pre_cutoff = len(
+            list(self.profile_abundance_df[self.profile_abundance_df > 0].stack().index))
+
+        # stats for post-cutoff high
+        num_of_profiles_post_cutoff_high = len(list(self.profile_abundance_df_cutoff_high))
+        num_associations_post_cutoff_high = len(
+            list(self.profile_abundance_df_cutoff_high[self.profile_abundance_df_cutoff_high > 0].stack().index))
+
+        # stats for post-cutoff low
+        num_of_profiles_post_cutoff_low = len(list(self.profile_abundance_df_cutoff_low))
+        num_associations_post_cutoff_low = len(
+            list(self.profile_abundance_df_cutoff_low[self.profile_abundance_df_cutoff_low > 0].stack().index))
+
+
+        print(f'The total number of predicted ITS2 type profiles was {num_of_profiles_pre_cutoff} representing {num_associations_pre_cutoff} associations.')
+        print(f'After screening for >0.40 there were {num_of_profiles_post_cutoff_high} profiles representing {num_associations_post_cutoff_high} associations.')
+        print(f'After screening for <0.40 but >0.05 there were {num_of_profiles_post_cutoff_low} profiles representing {num_associations_post_cutoff_low} associations.')
+
+        # for the high
+        print('\n\n')
+        abund_df_to_work_from = self.profile_abundance_df_cutoff_high
+        df_high = self._get_df_of_average_unique_groups_per_profile_per_factor(abund_df_to_work_from)
+
+        self._report_on_fidelity(df_high, high_low='high')
+        print('\n\n')
+        # for the low
+        abund_df_to_work_from = self.profile_abundance_df_cutoff_low
+        df_low = self._get_df_of_average_unique_groups_per_profile_per_factor(abund_df_to_work_from)
+
+        self._report_on_fidelity(df_low, high_low='low')
+
+        print('\n\nRunning stats:')
+        for factor in self.experimental_metadata_info_df.columns:
+            stat, p = scipy.stats.mannwhitneyu(df_high[factor], df_low[factor])
+            print(f'{factor}: {stat}: {p}')
+
+        # I think it would also be really useful to know what proportion of the overall sample abundances were accounted for by the lower upper and discounted ITS2 type profile abundances
+        total = sum(self.profile_abundance_df.sum())
+        total_high = sum(self.profile_abundance_df_cutoff_high.sum())
+        high_perc = total_high/total*100
+        total_low = sum(self.profile_abundance_df_cutoff_low.sum())
+        low_perc = total_low/total*100
+        total_discount = total-total_high-total_low
+        discount_perc = total_discount/total*100
+
+        print(f'The high cutoff collection of ITS2 type profile instances represented {high_perc:.2f}% of the sequences')
+        print(
+            f'The low cutoff collection of ITS2 type profile instances represented {low_perc:.2f}% of the sequences')
+        print(
+            f'The instances discounted within the <0.05 cutoff represented {discount_perc:.2f}% of the sequences')
+        foo = 'bar'
+
+    def _report_on_fidelity(self, df, high_low):
+        # now it just remains to work out the averages for each of the factor columns
+        print(f'For the {high_low} cutoff')
+        for factor in self.experimental_metadata_info_df.columns:
+            # temp_ser = df[factor]
+            # non_one = temp_ser[temp_ser > 1]
+            # percent = len(non_one)/len(temp_ser) * 100
+            # print(f'{factor}: {percent}% of profiles had > 1 group')
+            av_val = df[factor].mean()
+            print(f'{factor}: {av_val} average unique groups')
+
+    def _get_df_of_average_unique_groups_per_profile_per_factor(self, abund_df_to_work_from):
+        # df = pd.DataFrame(columns=self.experimental_metadata_info_df.columns,
+        #                   index=self.profile_abundance_df_cutoff_high.columns)
+        dict_for_df = {}
+        for type_uid in abund_df_to_work_from.columns:
+            temp_series = abund_df_to_work_from[type_uid]
+            temp_series_non_zero_series = temp_series[temp_series > 0]
+            smp_uid_list = temp_series_non_zero_series.index.values.tolist()
+            if len(smp_uid_list) > 1:
+                temp_list = []
+                for factor in self.experimental_metadata_info_df.columns:
+                    unique_groups = set(
+                        [self.experimental_metadata_info_df.loc[smp_uid, factor] for smp_uid in smp_uid_list])
+                    temp_list.append(len(unique_groups))
+                    # df.at[type_uid, factor] = len(unique_groups)
+                dict_for_df[type_uid] = temp_list
+        df = pd.DataFrame.from_dict(dict_for_df, columns=self.experimental_metadata_info_df.columns, orient='index')
+        return df
+
     def _create_profile_distance_dict_per_clade_cutoff_high_low(self, profile_abundance_df, high_low):
         """This should load in the """
 
@@ -3172,7 +3261,7 @@ class MetaInfoPlotter:
                 else:
                     heights_list.append(0)
             y0_list = [data_y0 for _ in range(num_categories)]
-            return y0_list, x0_list, heights_list, width_list,
+            return y0_list, x0_list, heights_list, width_list
 
 
 
@@ -3189,7 +3278,8 @@ if __name__ == "__main__":
     # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
     # cct_uid_string_005 and cct_uid_string_006
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
-    rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
+    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
+    rest_analysis.report_on_fidelity_proxies_for_profile_associations()
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
 
