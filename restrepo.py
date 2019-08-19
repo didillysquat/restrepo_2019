@@ -63,6 +63,7 @@ from skbio.stats.ordination import pcoa
 import statistics
 from multiprocessing import Pool
 from statistics import variance
+from sklearn import linear_model
 
 def braycurtis_tup(u_v_tup, w=None):
     import scipy.spatial.distance as distance
@@ -300,6 +301,134 @@ class RestrepoAnalysis:
         self.seasons = ['Winter', 'Summer']
 
         self._del_propblem_sample()
+
+    def make_networks(self):
+        # The collections of ITS2 type profiles that we will make networks for.
+        network_dict = {
+            'M_1':[
+                'A1k/A1', 'A1k/A1-A1ea', 'A1/A1k-A1b-A1z', 'A1/A1w-A1y'
+            ],
+            'SE_1':[
+                'A1-A1x-A1r-A1u-A1g'
+            ],
+            'ST_1':[
+                'A1-A1dl-A1bh', 'A1-A1m-A1z', 'A1-A1m', 'A1-A1m-A1n'
+            ],
+            'PC_1':[
+                'A1-A1c-A1h-A1q-A1a', 'A1-A1c-A1h-A1i', 'A1-A1c-A1h-A1q', 'A1-A1c-A1k-A1h-A1q', 'A1-A1c-A1h-A1cv', 'A1-A1cc-A1c-A1h-A1q-A1i', 'A1/A1c-A1h', 'A1/A1c-A1h-A1ce'
+            ],
+            's_pist_2':[
+                'A1/A1l/A1g-A1o-A1p', 'A1g/A1l/A1-A1o-A1cr-A1dp-A1p-A1dq-A1dn'
+            ],
+            'GX_1':[
+                'C1/C39-C1b-C39a-C1af', 'C1-C1b-C39-C41-C1af-C1ae'
+            ],
+            'GX_2':[
+                'C1-C1b-C39-C41-C1ae-C41f-C41a-C1af', 'C1-C1b-C41f-C41-C41a-C39-C41e-C1ae-C1f'
+            ],
+            'P_1':[
+                'C15/C60a-C15b-C15e', 'C15', 'C15-C15by-C15ai', 'C15-C15y-C15df-C15x-C15a-C15w-C15z-C15aa-C15ab', 'C15-C15y-C15a-C15z-C15x-C15aa-C15v', 'C15-C15df-C15y-C15v-C15x-C15a-C15z-C15aa', 'C15-C15x-C15v-C15ab-C15u-C15c-C15d', 'C15-C15x-C15v-C15u-C15d-C15c-C15ab-C15dg'
+            ],
+            'P_2':[
+                'C15/C22b/C15h', 'C22b/C15-C15a-C15an-C15de', 'C22b/C15-C15r', 'C15/C15r', 'C22b/C15-C15r-C15s', 'C15/C22b'
+            ],
+            'G_1':[
+                'D4/D1/D1ab-D6', 'D1-D4-D6-D2b-D2a-D1d', 'D1/D4-D6-D6b', 'D1-D4-D6-D6b-D1d-D1i-D1j-D10', 'D1-D4-D6b-D6-D1d-D1q-D1j'
+            ]
+        }
+
+        # Firstly go through each of the networks to make sure that the type names match up. I.e. check for typos.
+        print('\n\nChecking for profile names in meta info')
+        for profile_list in network_dict.values():
+            for profile_name in profile_list:
+                match_count = self.profile_meta_info_df['ITS2 type profile'].values.tolist().count(profile_name)
+                if match_count > 1:
+                    print(f'{profile_name} name found {match_count} times')
+                elif match_count == 0:
+                    print(f'{profile_name} name not found')
+        print('Checking complete')
+
+        # we want the network to have various characteristics.
+        # The size of the nodes should represent the total abundance of that sequenece throughout all of the samples
+        # whilst the greyscale colour of the node should represent the proportion of samples that the sequences
+        # was found in.
+        # to make this happen
+
+        # for each network in the network dict
+        #
+
+    def report_on_reef_type_effect_metrics(self):
+        """This will report on the proportion of ITS2 type profile instances that were found in both reefs belonging
+        to a given reef type divided by the total number of instances for those two reef types. We will use this metric
+        to investigate whether the inshore reef type had a more specialist set of ITS2 type profiles compared to the
+        other reef types"""
+        x_y_df = pd.DataFrame(columns=['num_samples', 'num_reefs', 'num_reef_types'], index=self.profile_abundance_df_cutoff_high.columns, dtype='float')
+        for reef_type in self.reef_types:
+            total = 0
+            numerator = 0
+            for profile_uid in self.profile_abundance_df_cutoff_high.columns:
+                # get a set of the reefs that this profile was found in. If the set does not contain any
+                # of the reefs from the oother reef tyeps, we will add the occurences to the numerator
+                # we will also keep track of the total. Then divide.
+                temp_series = self.profile_abundance_df_cutoff_high[profile_uid]
+                temp_series_non_zero_series = temp_series[temp_series > 0]
+                smpl_index_list = temp_series_non_zero_series.index.values.tolist()
+                reefs = [self.experimental_metadata_info_df.at[smpl_uid, 'reef'] for smpl_uid in smpl_index_list]
+                reef_types = [self.experimental_metadata_info_df.at[smpl_uid, 'reef_type'] for smpl_uid in smpl_index_list]
+                reefs_set = set(reefs)
+                if self._contains_other_reef_types(reef_type=reef_type, reefs_set=reefs_set):
+                    # Then this does not get added to the numerator, only the denominator
+                    # Also we should only be adding according to the number of type profiles that were in samples
+                    # of the reef_type in question
+                    total += reef_types.count(reef_type)
+                else:
+                    total += len(smpl_index_list)
+                    numerator += len(smpl_index_list)
+                x_y_df.at[profile_uid, 'num_samples'] = len(smpl_index_list)
+                x_y_df.at[profile_uid, 'num_reefs'] = len(reefs_set)
+                x_y_df.at[profile_uid, 'num_reef_types'] = len(set(reef_types))
+            print(f'For reef type {reef_type}: the specificity metric was {numerator/total:.2f}')
+
+        # The second thing to look at is the correlation between the number of samples a given ITS2 type profile was
+        # found in and the number of different reefs it was found in
+
+        # we want to create x and y variables where number of reefs is y and the number of samples a given
+        # ITS2 type profile was found in is x. We will collect X and Y above to prevent us from having
+        # to run essentially the same loop structures again.
+        print(x_y_df.dtypes)
+        lm = linear_model.LinearRegression()
+        X = x_y_df['num_samples'].values.reshape(-1,1)
+        y = x_y_df['num_reefs'].values.reshape(-1,1)
+        model = lm.fit(X,y)
+        score = lm.score(X,y)
+        print(model)
+        print(score)
+        print(f'The R2 value for number of samples predicting number of reefs was: {score}')
+
+        import scipy.stats
+
+        X = x_y_df['num_samples']
+        y = x_y_df['num_reefs']
+        y2 = x_y_df['num_reef_types']
+        this = len(X)
+        that = len(y)
+        slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(x=X, y=y)
+        slope_2, intercept_2, r_value_2, p_value_2, std_err_2 = scipy.stats.linregress(x=X, y=y2)
+
+        foo = 'bar'
+
+    def _contains_other_reef_types(self, reef_type, reefs_set):
+        """Checks to see if a set contains reefs that are from other reef types than the one provided"""
+        if reef_type == 'Inshore':
+            if len(list(reefs_set & {'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi'})) >= 1 or len(reefs_set) == 1:
+                return True
+        elif reef_type == 'Midshelf':
+            if len(list(reefs_set & {'Fsar', 'Tahla', 'Shib Nazar', 'Abu Madafi'})) >= 1 or len(reefs_set) == 1:
+                return True
+        elif reef_type == 'Offshore':
+            if len(list(reefs_set & {'Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal'})) >= 1 or len(reefs_set) == 1:
+                return True
+        return False
 
     def report_on_fidelity_proxies_for_profile_associations(self):
         """Report the stats for the two its2 type profile schematics. Looks at how many types for each of the
@@ -3279,7 +3408,9 @@ if __name__ == "__main__":
     # cct_uid_string_005 and cct_uid_string_006
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
-    rest_analysis.report_on_fidelity_proxies_for_profile_associations()
+    # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
+    # rest_analysis.report_on_reef_type_effect_metrics()
+    rest_analysis.make_networks()
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
 
