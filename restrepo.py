@@ -262,7 +262,7 @@ class RestrepoAnalysis:
         # ITS2 sequence abundance (post-MED) dataframe
         self.post_med_seq_abundance_relative_df = self._post_med_seq_abundance_relative_df()
 
-        self.pre_med_seq_abundance_relative_df = self._pre_med_seq_abundance_relative_df()
+        # self.pre_med_seq_abundance_relative_df = self._pre_med_seq_abundance_relative_df()
 
         # ITS2 sequence abundance meta info for sequencing (QC steps)
         self.seq_meta_data_df = self._populate_seq_meta_data_df()
@@ -288,10 +288,13 @@ class RestrepoAnalysis:
         # info dictionaries
         self.old_color_dict = {
             'G': '#98FB98', 'GX': '#F0E68C', 'M': '#DDA0DD', 'P': '#8B008B',
-            'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E', 1: '#CAE1FF', 15: '#2E37FE', 30: '#000080',
-            'Summer': '#FF0000', 'Winter': '#00BFFF', 'Inshore': '#FF0000',
-            'Midshelf': '#FFFF00', 'Offshore': '#008000', 'Al Fahal': '#98FB98', 'Abu Madafi': '#F0E68C',
-            'Qita al Kirsh': '#DDA0DD', 'Shib Nazar': '#8B008B', 'Tahla': '#00BFFF', 'Fsar': '#0000CD'}
+            'PC': '#00BFFF', 'SE': '#0000CD', 'ST': '#D2691E',
+            1: '#CAE1FF', 15: '#2E37FE', 30: '#000080',
+            'Summer': '#FF0000', 'Winter': '#00BFFF',
+            'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000',
+            'Al Fahal': '#A7414A', 'Abu Madafi': '#563838',
+            'Qita al Kirsh': '#6A8A82', 'Shib Nazar': '#A37C27',
+            'Tahla': '#1ECFD6', 'Fsar': '#6465A5'}
         self.reefs = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
 
         self.species_category_list = ['SE','PC', 'M', 'G', 'P','GX', 'ST']
@@ -743,8 +746,9 @@ class RestrepoAnalysis:
         gs = gridspec.GridSpec(20, 27)
 
         # average plots
-        one_m_all_sites = plt.subplot(gs[:9, :8])
-        fifteen_m_all_sites = plt.subplot(gs[11:, :8])
+        one_m_all_sites = plt.subplot(gs[:6, :8])
+        fifteen_m_all_sites = plt.subplot(gs[7:13, :8])
+        thirty_m_all_sites = plt.subplot(gs[14:20, :8])
 
         # inshore
         inshore_fsar = plt.subplot(gs[:6, 9:13])
@@ -798,10 +802,13 @@ class RestrepoAnalysis:
 
         # now plot the other two
 
-        x = self._plot_one_m_temp(one_m_all_sites, reef_order, abbrev_dict)
+        # x = self._plot_one_m_temp(one_m_all_sites, reef_order, abbrev_dict)
+        #
+        # self._plot_fifteen_m_temp(fifteen_m_all_sites, reef_order, abbrev_dict)
 
-        self._plot_fifteen_m_temp(fifteen_m_all_sites, reef_order, abbrev_dict)
-
+        self._plot_depth_plot(ax=one_m_all_sites, reef_order=reef_order, abbrev_dict=abbrev_dict, depth_label='1')
+        self._plot_depth_plot(ax=fifteen_m_all_sites, reef_order=reef_order, abbrev_dict=abbrev_dict, depth_label='15')
+        self._plot_depth_plot(ax=thirty_m_all_sites, reef_order=reef_order, abbrev_dict=abbrev_dict, depth_label='30')
         # now do the box plot
         self._plot_temp_box_plots(box_plot_ax)
 
@@ -851,6 +858,20 @@ class RestrepoAnalysis:
         one_m_all_sites.set_yticks([24, 26, 28, 30, 32, 34])
         one_m_all_sites.grid()
         one_m_all_sites.set_xticks([])
+        # one_m_all_sites.patch.set_facecolor('#DCDCDC')
+        return x
+
+    def _plot_depth_plot(self, ax, reef_order, abbrev_dict, depth_label):
+        x = self.daily_temperature_av_df.index.values.tolist()
+        for reef in reef_order:
+            column_header = f'{abbrev_dict[reef]}_{depth_label}'
+            if column_header in list(self.temperature_df):
+                y = self.daily_temperature_av_df[column_header].values.tolist()
+                ax.plot(x, y, c=self.old_color_dict[reef], lw='0.5')
+        ax.set_ylim(24, 34)
+        ax.set_yticks([24, 26, 28, 30, 32, 34])
+        ax.grid()
+        ax.set_xticks([])
         # one_m_all_sites.patch.set_facecolor('#DCDCDC')
         return x
 
@@ -3317,9 +3338,6 @@ class MetaInfoPlotter:
 
     def plot_reef_meta(self):
         # Plot species, season, depth, reef type
-        color_dict = {
-            'Al Fahal': '#98FB98', 'Abu Madafi': '#F0E68C',
-            'Qita al Kirsh': '#DDA0DD', 'Shib Nazar': '#8B008B', 'Tahla': '#00BFFF', 'Fsar': '#0000CD'}
         category_list = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
 
 
@@ -3452,7 +3470,9 @@ if __name__ == "__main__":
     # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
     # cct_uid_string_005 and cct_uid_string_006
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
-    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
+    # code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
+    # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
+    rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
     # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
     # rest_analysis.report_on_reef_type_effect_metrics()
     # rest_analysis.make_networks()
@@ -3460,7 +3480,7 @@ if __name__ == "__main__":
     # rest_analysis.output_seq_analysis_overview_outputs()
 
     # rest_analysis.plot_pcoa_of_cladal()
-    # rest_analysis._plot_temperature()
+    rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
     # rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
