@@ -244,7 +244,6 @@ class RestrepoAnalysis:
         self.profile_distance_df_dict_cutoff_high = {}
         self._create_profile_df_with_cutoff_high_low(cutoff_low=0.40)
         self._populate_clade_dist_df_dict(cct_specific='040')
-        # TODO we need to get the tup list and create the specific cct distances for the 0.05-0.40 distances
         self.profile_abundance_df_cutoff_low = None
         self.prof_uid_to_local_abund_dict_cutoff_low = {}
         self.profile_distance_df_dict_cutoff_low = {}
@@ -262,6 +261,8 @@ class RestrepoAnalysis:
 
         # ITS2 sequence abundance (post-MED) dataframe
         self.post_med_seq_abundance_relative_df = self._post_med_seq_abundance_relative_df()
+
+        self.pre_med_seq_abundance_relative_df = self._pre_med_seq_abundance_relative_df()
 
         # ITS2 sequence abundance meta info for sequencing (QC steps)
         self.seq_meta_data_df = self._populate_seq_meta_data_df()
@@ -350,12 +351,23 @@ class RestrepoAnalysis:
 
         # we want the network to have various characteristics.
         # The size of the nodes should represent the total abundance of that sequenece throughout all of the samples
-        # whilst the greyscale colour of the node should represent the proportion of samples that the sequences
-        # was found in.
-        # to make this happen
+        # whilst the greyscale colour of the node and the outline thickness
+        # should represent the proportion of samples that the sequence was found in.
+
+        # to make this happen we will need seq abundances for both the post-med and the pre-med
+
 
         # for each network in the network dict
-        #
+        # Get a list of the samples that the profile was found in from the high cutoff df
+        # Then have two default dicts for counting the number of samples given sequences are in
+        # and for counting the relative abundance of those sequences within the samples (as a proportion of the type)
+        # first one will be key is sequences, value is samples found in.
+        # the second will be sequnces, the second will be cumulative relative abundance from samples
+        # we should also have a master fasta that will hold the actual nucleotide sequences of the seqs in the net
+        # Then, for each of these samples populate the default dicts. And populate the master fasta too.
+        # at ths point we are ready to make a network!
+
+        # for network in
 
     def report_on_reef_type_effect_metrics(self):
         """This will report on the proportion of ITS2 type profile instances that were found in both reefs belonging
@@ -545,9 +557,14 @@ class RestrepoAnalysis:
         self.profile_rel_abund_ouput_path = os.path.join(self.base_sp_output_dir, 'its2_type_profiles', '77_DBV_20190721_2019-08-06_09-21-49.148787.profiles.relative.abund_and_meta.txt')
         self.profile_abs_abund_ouput_path = os.path.join(self.base_sp_output_dir, 'its2_type_profiles', '77_DBV_20190721_2019-08-06_09-21-49.148787.profiles.absolute.abund_and_meta.txt')
 
-        # Paths to seq count tables
+        # Paths to seq count tables post_med
         self.seq_rel_abund_post_med_ouput_path = os.path.join(self.base_sp_output_dir, 'post_med_seqs', '77_DBV_20190721_2019-08-06_09-21-49.148787.seqs.relative.abund_only.txt')
         self.seq_abs_abund_post_med_ouput_path = os.path.join(self.base_sp_output_dir, 'post_med_seqs', '77_DBV_20190721_2019-08-06_09-21-49.148787.seqs.absolute.abund_and_meta.txt')
+
+        # Paths to seq count tables pre_med
+        self.seq_rel_abund_pre_med_ouput_path_list = [os.path.join(self.base_sp_output_dir, 'pre_med_seqs',
+                                                              f'pre_med_relative_abundance_df_{uid}.csv') for uid in ['341', '349', '350']]
+
 
         # Paths to the standard output profile distance files braycurtis derived
         self.between_profile_clade_braycurtis_dist_path_dict = {
@@ -617,7 +634,6 @@ class RestrepoAnalysis:
             'D': os.path.join(self.base_sp_output_dir, 'between_sample_distances_unifrac', 'D', '2019-08-06_09-21-49.148787_unifrac_btwn_sample_distances_D.dist')
         }
 
-
     def _populate_seq_meta_data_df(self):
         """This method will produce a dataframe that has sample UID as the key and the QC metadata items as the
         columns"""
@@ -661,7 +677,6 @@ class RestrepoAnalysis:
                 # now set up the gridlines which will join all integer points on both axes
 
         qp = QuantPlot(self)
-
 
     def _make_temp_df(self):
         # We should plot the daily averages rather then every point as readability suffers. We can then do
@@ -717,7 +732,6 @@ class RestrepoAnalysis:
             pickle.dump(self.daily_temperature_av_df, open(os.path.join(self.cache_dir, 'daily_temperature_av_df.p'), 'wb'))
             pickle.dump(self.daily_temperature_range_df, open(os.path.join(self.cache_dir, 'daily_temperature_range_df.p'), 'wb'))
             pickle.dump(self.temperature_df, open(os.path.join(self.cache_dir, 'temperature_df.p'), 'wb'))
-
 
     def _populate_bin_list_for_single_time(self, bin_lists, time_ind):
         for i, temp_val in enumerate(self.temperature_df.loc[time_ind].values.tolist()):
@@ -1070,6 +1084,41 @@ class RestrepoAnalysis:
             pickle.dump(df, open(os.path.join(self.cache_dir, 'seq_df.p'), 'wb'))
             return df
 
+    def _pre_med_seq_abundance_relative_df(self):
+        """we will produce a df that is index as sample_uid and sequence name as cols.
+        The only problem is that we have three separate pre-med csvs to work with so we will have to do some
+        consolidation. We will also likely have to grab a list of uids or names from which to get a master
+        fasta out of the SymPortal db."""
+        if os.path.exists(os.path.join(self.cache_dir, 'seq_df_pre_med.p')):
+            return pickle.load(open(os.path.join(self.cache_dir, 'seq_df_pre_med.p'), 'rb'))
+        else:
+            list_of_dfs = []
+            for pre_seq_output_path in self.seq_rel_abund_pre_med_ouput_path_list:
+                with open(pre_seq_output_path, 'r') as f:
+                    seq_data = [out_line.split(',') for out_line in [line.rstrip() for line in f]]
+                cols = seq_data[0][2:]
+                # change the strange format of the unk_C_XXX
+                new_cols = []
+                for col_item in cols:
+                    if 'unk' in col_item:
+                        split_list = col_item.split('_')
+                        new_cols.append(f'{split_list[2]}_{split_list[1]}')
+                    else:
+                        new_cols.append(col_item)
+                seq_data = seq_data[1:]
+                ind = [int(sub[0]) for sub in seq_data]
+                seq_data = [sub[2:] for sub in seq_data]
+                print('a pre-med df was created')
+                df = pd.DataFrame(seq_data, columns=new_cols, index=ind).astype('float')
+                list_of_dfs.append(df)
+                # df = pd.read_csv(filepath_or_buffer=pre_seq_output_path, sep='\t', index_col=0, header=0)
+            print('first append')
+            master_df = list_of_dfs[0].append(list_of_dfs[1]).fillna(0).astype('float')
+            print('second append')
+            master_df = master_df.append(list_of_dfs[2])
+            pickle.dump(master_df, open(os.path.join(self.cache_dir, 'seq_df_pre_med.p'), 'wb'))
+            return master_df
+
     def _init_metadata_info_df(self):
         """ This method produces a dataframe that has sample UID as key and
         'species', 'reef', 'reef_type', 'depth' 'season' as columns.
@@ -1169,7 +1218,6 @@ class RestrepoAnalysis:
             meta_info_df = meta_info_df[['species', 'reef', 'reef_type', 'depth', 'season']]
             pickle.dump(meta_info_df, open(os.path.join(self.cache_dir, 'meta_info_df.p'), 'wb'))
             return meta_info_df
-
 
     def _add_new_name_to_old_name_entry_manually(self, new_name, new_name_to_old_name_dict, old_to_search):
         if new_name == 'Q15G6':
@@ -2556,8 +2604,6 @@ class RestrepoAnalysis:
             else:
                 self._create_prof_abund_high_low_from_scratch_and_pickle_out(cutoff_high, cutoff_low)
 
-
-
     def _create_prof_abund_high_low_from_scratch_and_pickle_out(self, cutoff_high, cutoff_low):
         num_profs_pre_cutoff = self._report_profiles_before_cutoff()
         # make new df from copy of old df
@@ -2772,7 +2818,6 @@ class RestrepoAnalysis:
             # we will also need to output the metainfo df for the analysis type instances in question
             meta_info_df_for_clade.to_csv(
                 path_or_buf=output_path_meta_info, sep=',', header=True, index=False, line_terminator='\n')
-
 
     def permute_sample_permanova(self, dist_method='braycurtis'):
         meta_df = self.experimental_metadata_info_df
@@ -3410,7 +3455,7 @@ if __name__ == "__main__":
     # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
     # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
     # rest_analysis.report_on_reef_type_effect_metrics()
-    rest_analysis.make_networks()
+    # rest_analysis.make_networks()
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
 
