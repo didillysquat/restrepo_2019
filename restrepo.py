@@ -921,7 +921,7 @@ class RestrepoAnalysis:
     def _create_clade_prop_distances(self):
         """Go through the self.parent.seq_df and get the proportion of A, C and D sequences
         for each sample and populate this into the self.clade_proportion_df."""
-        if os.path.exists(os.path.join(self.cache_dir, 'betweeen_samplTe_clade_proportion_distances.p')):
+        if os.path.exists(os.path.join(self.cache_dir, 'betweeen_sample_clade_proportion_distances.p')):
             self.clade_prop_pcoa_coords = pickle.load(open(os.path.join(self.cache_dir, 'clade_prop_pcoa_coords.p'), 'rb'))
             self.clade_proportion_df = pickle.load(
                 open(os.path.join(self.cache_dir, 'clade_proportion_df.p'), 'rb'))
@@ -1388,6 +1388,7 @@ class RestrepoAnalysis:
             self.prof_uid_to_name_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_name_dict.p'), 'rb'))
             self.prof_name_to_uid_dict = pickle.load(open(os.path.join(self.cache_dir, 'prof_name_to_uid_dict.p'), 'rb'))
             self.profile_meta_info_df = pickle.load(open(os.path.join(self.cache_dir, 'profile_meta_info_df.p'), 'rb'))
+            self.profile_meta_info_df['ITS2 type abundance local'] = self.profile_meta_info_df['ITS2 type abundance local'].astype('float')
         else:
             # read in df
             df = pd.read_csv(filepath_or_buffer=self.profile_rel_abund_ouput_path, sep='\t', header=None)
@@ -2970,38 +2971,54 @@ class RestrepoAnalysis:
         print('\n\nusing the non-cutoff profile df')
         self._claclulate_av_abundance_of_clade_profiles(df_to_calculate_from=self.profile_abundance_df)
         # now we do it using the df that does have the 0.05 abundance profile instances removed
-        print('\n\nusing the cutoff profile df')
+        print('\n\nusing the cutoff profile df high')
+        self._claclulate_av_abundance_of_clade_profiles(df_to_calculate_from=self.profile_abundance_df_cutoff_high)
+        print('\n\nusing the cutoff profile df low')
+        self._claclulate_av_abundance_of_clade_profiles(df_to_calculate_from=self.profile_abundance_df_cutoff_low)
+        print('\n\nusing the cutoff profile df 0.05')
         self._claclulate_av_abundance_of_clade_profiles(df_to_calculate_from=self.profile_abundance_df_cutoff)
-        self._calc_av_rank_of_clade_profile()
-
-    def _calc_av_rank_of_clade_profile(self):
+        print('\n\nusing the non-cutoff profile df')
+        self._calc_av_rank_of_clade_profile(df_to_calculate_from=self.profile_abundance_df)
+        print('\n\nusing the high cutoff profile df')
+        self._calc_av_rank_of_clade_profile(df_to_calculate_from=self.profile_abundance_df_cutoff_high)
+        print('\n\nusing the low cutoff profile df')
+        self._calc_av_rank_of_clade_profile(df_to_calculate_from=self.profile_abundance_df_cutoff_low)
+        print('\n\nusing the 0.05 cutoff profile df')
+        self._calc_av_rank_of_clade_profile(df_to_calculate_from=self.profile_abundance_df_cutoff)
+        foo = 'bar'
+    def _calc_av_rank_of_clade_profile(self, df_to_calculate_from):
         # we can also ask the question of what the average rank of the type was. For example, on average, Cladocopium its2 type profile was the 1.4th most abundant profile
         # we could also plot this as we can have an average value for each profile and average these in turn with a n value. the stdv will then
         print('\n\n')
         dd_dict_profile_av_rankings = defaultdict(list)
-        for profile_uid in list(self.profile_abundance_df):  # for every column/profile
+        for profile_uid in list(df_to_calculate_from):  # for every column/profile
             # ignore the one profile that was only found in the problematic sample we had to remove
             # profile uid 2989
             if profile_uid == 2989:
                 continue
             temp_rank_list = []
-            indexers_non_zero = list(self.profile_abundance_df[profile_uid].to_numpy().nonzero()[0])
+            indexers_non_zero_int = list(df_to_calculate_from[profile_uid].to_numpy().nonzero()[0])
+            if not indexers_non_zero_int:
+                continue
             # for each sample that the profile was found in
             # work out what rank the type was
-            for i in indexers_non_zero:
+            for i in indexers_non_zero_int:
                 # get the non_zero values
-                indexers_non_zero = list(self.profile_abundance_df.iloc[i,].to_numpy().nonzero()[0])
-                non_zero_series = self.profile_abundance_df.iloc[i, indexers_non_zero]
+                indexers_non_zero = list(df_to_calculate_from.iloc[i,].to_numpy().nonzero()[0])
+                non_zero_series = df_to_calculate_from.iloc[i, indexers_non_zero]
                 non_zero_series_ordered = non_zero_series.sort_values(ascending=False)
                 sorted_vals = non_zero_series_ordered.values.tolist()
                 # now see what rank the value in question is
-                value_of_profile_in_question = self.profile_abundance_df.iloc[i][profile_uid]
+                value_of_profile_in_question = df_to_calculate_from.iloc[i][profile_uid]
                 for i, val in enumerate(sorted_vals):
                     if val == value_of_profile_in_question:
                         temp_rank_list.append(i + 1)
                         break
-            dd_dict_profile_av_rankings[self.profile_meta_info_df.loc[profile_uid]['Clade']].append(
-                sum(temp_rank_list) / len(temp_rank_list))
+            try:
+                dd_dict_profile_av_rankings[self.profile_meta_info_df.loc[profile_uid]['Clade']].append(
+                    sum(temp_rank_list) / len(temp_rank_list))
+            except:
+                foo = 'asdf'
         for clade in list('ACD'):
             av_rank = sum(dd_dict_profile_av_rankings[clade]) / len(dd_dict_profile_av_rankings[clade])
             std = statistics.pstdev(dd_dict_profile_av_rankings[clade])
@@ -3103,12 +3120,12 @@ class RestrepoAnalysis:
 
     def _calc_cummulative_abund_of_top_half_abund_profiles(self, clade):
         df_clade_specific = self.profile_meta_info_df[self.profile_meta_info_df['Clade'] == clade]
-        sorted_df = df_clade_specific.sort_values(by='ITS2 type abundance DB', axis=0, ascending=False)
+        sorted_df = df_clade_specific.sort_values(by='ITS2 type abundance local', axis=0, ascending=False)
         num_profiles = len(df_clade_specific.index.values.tolist())
         print(f'{num_profiles} clade {clade} profiles were returned.')
         sum_of_first_half_most_abundant_profiles = sum(
-            sorted_df.iloc[:int(num_profiles / 2), ]['ITS2 type abundance DB'])
-        total_num_profile_instances_for_clade = sum(sorted_df['ITS2 type abundance DB'])
+            sorted_df.iloc[:int(num_profiles / 2), ]['ITS2 type abundance local'])
+        total_num_profile_instances_for_clade = sum(sorted_df['ITS2 type abundance local'])
         percent_rep_by_most_abund_profiles = sum_of_first_half_most_abundant_profiles / total_num_profile_instances_for_clade
         print(f'The 50% most abundant profiles represented {percent_rep_by_most_abund_profiles} of the {total_num_profile_instances_for_clade} total profile-sample occurences for this genus.')
 
@@ -3484,7 +3501,7 @@ class MetaInfoPlotter:
 
 
 if __name__ == "__main__":
-    rest_analysis = RestrepoAnalysis(cutoff_abund=0.40, remove_se=True, maj_only=True, remove_se_clade_props=True)
+    rest_analysis = RestrepoAnalysis(cutoff_abund=0.05, remove_se=True, maj_only=True, remove_se_clade_props=True)
     # When we ran the analysis of variance ratios within the context of the between sample distance permanova analysis
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
@@ -3503,7 +3520,7 @@ if __name__ == "__main__":
     # rest_analysis.report_on_reef_type_effect_metrics()
     # rest_analysis.make_networks()
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
-    # rest_analysis.output_seq_analysis_overview_outputs()
+    rest_analysis.output_seq_analysis_overview_outputs()
 
     # rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis._plot_temperature()
