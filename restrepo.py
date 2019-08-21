@@ -2552,30 +2552,30 @@ class RestrepoAnalysis:
             values.extend(row.iloc[row.nonzero()].values.tolist())
         temp_series = pd.Series(values)
 
-        # sns.distplot(temp_series, hist=True, kde=True,
-        #              bins=100, color='darkblue',
-        #              hist_kws={'edgecolor': 'black'},
-        #              kde_kws={'linewidth': 4})
+        sns.distplot(temp_series, hist=True, kde=True,
+                     bins=50, color='darkblue',
+                     hist_kws={'edgecolor': 'black'},
+                     kde_kws={'linewidth': 2}, ax=ax_arr[0])
 
         # hist = temp_series.hist(bins=100, ax=ax_arr[0])
 
         # Now do the same plot with the 0.06 cutoff applied
-        cutoff = 0.06
+        cutoff = 0.05
         cut_off_values = [a for a in values if a > cutoff]
         temp_series = pd.Series(cut_off_values)
 
         sns.distplot(temp_series, hist=True, kde=True,
-                     bins=100, color='darkblue',
+                     bins=50, color='darkblue',
                      hist_kws={'edgecolor': 'black'},
-                     kde_kws={'linewidth': 2})
-        hist = temp_series.hist(bins=100, ax=ax_arr[1])
+                     kde_kws={'linewidth': 2}, ax=ax_arr[1])
+        # hist = temp_series.hist(bins=100, ax=ax_arr[1])
 
 
 
-        f.suptitle('Relative abundance of ITS2 type profile in sample', fontsize=14, x=0.5, y=0.05)
-        ax_arr[0].set_ylabel('Frequency of observation', fontsize=14)
+        # f.suptitle('Relative abundance of ITS2 type profile in sample', fontsize=14, x=0.5, y=0.05)
+        ax_arr[0].set_ylabel('Frequency of observation', fontsize=10)
         plt.savefig(os.path.join(self.figure_dir, 'hist.png'), dpi=1200)
-        plt.savefig(os.path.join(self.figure_dir, 'hist.png'), dpi=1200)
+        plt.savefig(os.path.join(self.figure_dir, 'hist.svg'), dpi=1200)
 
     def create_profile_df_with_cutoff(self):
         """Creates a new df from the old df that has all of the values below the cutoff_abundance threshold
@@ -3472,7 +3472,7 @@ if __name__ == "__main__":
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     # code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
     # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
-    rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
+    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
     # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
     # rest_analysis.report_on_reef_type_effect_metrics()
     # rest_analysis.make_networks()
@@ -3480,14 +3480,14 @@ if __name__ == "__main__":
     # rest_analysis.output_seq_analysis_overview_outputs()
 
     # rest_analysis.plot_pcoa_of_cladal()
-    rest_analysis._plot_temperature()
+    # rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
     # rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
     # rest_analysis.permute_sample_permanova(dist_method='unifrac')
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_profile_permanova()
-    # rest_analysis.histogram_of_all_abundance_values()
+    rest_analysis.histogram_of_all_abundance_values()
 
 
 
