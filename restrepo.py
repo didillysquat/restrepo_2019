@@ -2551,29 +2551,47 @@ class RestrepoAnalysis:
         for index, row in self.profile_abundance_df.iterrows():
             values.extend(row.iloc[row.nonzero()].values.tolist())
         temp_series = pd.Series(values)
-
-        sns.distplot(temp_series, hist=True, kde=True,
+        print(len(temp_series))
+        ax_zero_second = ax_arr[0].twinx()
+        sns.distplot(temp_series, hist=False, kde=True,
                      bins=50, color='darkblue',
                      hist_kws={'edgecolor': 'black'},
-                     kde_kws={'linewidth': 2}, ax=ax_arr[0])
+                     kde_kws={'linewidth': 2}, ax=ax_zero_second, norm_hist=False)
+        sns.distplot(temp_series, hist=True, kde=False,
+                     bins=50, color='darkblue',
+                     hist_kws={'edgecolor': 'black'},
+                     kde_kws={'linewidth': 2}, ax=ax_arr[0], norm_hist=False)
 
-        # hist = temp_series.hist(bins=100, ax=ax_arr[0])
+
+        # hist = temp_series.hist(bins=50, ax=ax_arr[0])
 
         # Now do the same plot with the 0.06 cutoff applied
         cutoff = 0.05
         cut_off_values = [a for a in values if a > cutoff]
         temp_series = pd.Series(cut_off_values)
-
-        sns.distplot(temp_series, hist=True, kde=True,
+        ax_one_second = ax_arr[1].twinx()
+        sns.distplot(temp_series, hist=False, kde=True,
                      bins=50, color='darkblue',
                      hist_kws={'edgecolor': 'black'},
-                     kde_kws={'linewidth': 2}, ax=ax_arr[1])
+                     kde_kws={'linewidth': 2}, ax=ax_one_second, norm_hist=False)
+        sns.distplot(temp_series, hist=True, kde=False,
+                     bins=50, color='darkblue',
+                     hist_kws={'edgecolor': 'black'},
+                     kde_kws={'linewidth': 2}, ax=ax_arr[1], norm_hist=False)
         # hist = temp_series.hist(bins=100, ax=ax_arr[1])
 
 
 
         # f.suptitle('Relative abundance of ITS2 type profile in sample', fontsize=14, x=0.5, y=0.05)
         ax_arr[0].set_ylabel('Frequency of observation', fontsize=10)
+        ax_arr[1].set_ylabel('Frequency of observation', fontsize=10)
+        ax_arr[0].set_title('Before 0.05 cutoff')
+        ax_arr[1].set_title('After 0.05 cutoff')
+        ax_zero_second.set_ylabel('Density', fontsize=10, rotation=270)
+        ax_one_second.set_ylabel('Density', fontsize=10, rotation=270)
+        ax_zero_second.set_ylim((0,5))
+        ax_one_second.set_ylim((0, 5))
+        f.tight_layout()
         plt.savefig(os.path.join(self.figure_dir, 'hist.png'), dpi=1200)
         plt.savefig(os.path.join(self.figure_dir, 'hist.svg'), dpi=1200)
 
@@ -3040,19 +3058,27 @@ class RestrepoAnalysis:
 
     def _report_predicted_profiles_overview(self):
         total_unique_number_of_type_profiles = len(self.profile_meta_info_df.index.tolist())
-        total_absolute_number_of_type_profiles = sum(self.profile_meta_info_df['ITS2 type abundance DB'])
-        print(f'Across all clades {total_absolute_number_of_type_profiles} ITS2 type profile instances were '
-              f'predicted representing {total_unique_number_of_type_profiles} different profiles')
+        total_absolute_number_of_type_profile_instances_local = sum(self.profile_meta_info_df['ITS2 type abundance local'].astype('float'))
+        total_absolute_number_of_type_profile_instances_global = sum(self.profile_meta_info_df['ITS2 type abundance DB'])
+        print(f'Across all clades {total_absolute_number_of_type_profile_instances_local} ITS2 type profile instances were '
+              f'predicted in this study representing {total_unique_number_of_type_profiles} different profiles.')
 
-        # The profile cutoff df = self.prof_df_cutoff
+        # The cutoff dfs are self.profile_abundance_df_cutoff_high and self.profile_abundance_df_cutoff_low
         number_of_types_from_df_pre_cutoff = len(self.profile_abundance_df.columns.values.tolist())  # 111
-        number_of_types_from_df_post_cutoff = len(self.profile_abundance_df_cutoff.columns.values.tolist())  # 92
+        number_of_types_from_df_post_cutoff_high = len(self.profile_abundance_df_cutoff_high.columns.values.tolist())
+        number_of_types_from_df_post_cutoff_low = len(self.profile_abundance_df_cutoff_low.columns.values.tolist())
+
         # https://stackoverflow.com/questions/952914/how-to-make-a-flat-list-out-of-list-of-lists
-        number_of_instances_after_cutoff = [item for sublist in (self.profile_abundance_df >= 0.05).values.tolist() for item in
-                                            sublist].count(True)  # 811
+        number_of_instances_after_cutoff_high = [item for sublist in (self.profile_abundance_df_cutoff_high > 0).values.tolist() for item in sublist].count(True)
+        number_of_instances_after_cutoff_low = [item for sublist in
+                                                 (self.profile_abundance_df_cutoff_low > 0).values.tolist() for item in
+                                                 sublist].count(True)
         print(f'Number of different profiles pre 0.05 cutoff: {number_of_types_from_df_pre_cutoff}')
-        print(f'Number of different profiles post 0.05 cutoff: {number_of_types_from_df_post_cutoff}')
-        print(f'Number of profile instances after 0.05 cutoff: {number_of_instances_after_cutoff}')
+        print(f'Number of different profiles in high cutoff: {number_of_types_from_df_post_cutoff_high}')
+        print(f'Number of different profiles in low cutoff: {number_of_types_from_df_post_cutoff_low}')
+
+        print(f'Number of profile instances in high cutoff: {number_of_instances_after_cutoff_high}')
+        print(f'Number of profile instances in low cutoff: {number_of_instances_after_cutoff_low}')
 
     def _report_sequencing_overview(self):
         # total number of sequences pre-QC
@@ -3487,7 +3513,7 @@ if __name__ == "__main__":
     # rest_analysis.permute_sample_permanova(dist_method='unifrac')
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_profile_permanova()
-    rest_analysis.histogram_of_all_abundance_values()
+    # rest_analysis.histogram_of_all_abundance_values()
 
 
 
