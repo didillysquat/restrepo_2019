@@ -119,7 +119,7 @@ class RestrepoAnalysis:
     """The class responsible for doing all python based analyses for the restrepo et al. 2019 paper.
     NB although we see clade F in the dataset this is minimal and so we will
     tackle this sepeately to the analysis of the A, C and D."""
-    def __init__(self, cutoff_abund, seq_distance_method='unifrac', profile_distance_method='unifrac', ignore_cache=False, remove_se=False, maj_only=False, remove_se_clade_props=False):
+    def __init__(self, cutoff_abund, seq_distance_method, profile_distance_method='unifrac', ignore_cache=False, remove_se=False, maj_only=False, remove_se_clade_props=False):
         # root_dir is the root dir of the git repo
         self.root_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -166,7 +166,7 @@ class RestrepoAnalysis:
         self.remove_se_clade_props = remove_se_clade_props
 
         self.clades = list('ACD')
-        self.clade_genera_labels = ['Symbiodinium', 'Cladocopium', 'Durisdinium']
+        self.clade_genera_labels = ['Symbiodinium', 'Cladocopium', 'Durusdinium']
 
         # Info containers
         self.smp_uid_to_name_dict = None
@@ -973,7 +973,7 @@ class RestrepoAnalysis:
         # now we have the containers populated and we can output the required results summaries
         print('\n\n')
         for i in range(3):
-            print(f'{num_clade_dd[i+1]} samples had sequnces from only {i+1} family')
+            print(f'{num_clade_dd[i+1]} samples had sequences from only {i+1} family')
         print('\n\n')
         for i in range(3):
             num_samp = len(av_abund_of_the_nth_abundant_clade_dd[i])
@@ -1337,7 +1337,7 @@ class RestrepoAnalysis:
 
         for clade in self.clades:
             with open(path_dict_to_use[clade], 'r') as f:
-                if smp_dist == 'braycurtis':
+                if smp_dist and self.seq_distance_method == 'braycurtis':
                     clade_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f][1:]]
                 else:
                     clade_data = [out_line.split('\t') for out_line in [line.rstrip() for line in f]]
@@ -1457,7 +1457,7 @@ class RestrepoAnalysis:
 
     def plot_pcoa_of_cladal(self):
         class PCOAByClade:
-            """Cladd for plotting a series of PCoAs for the sample distances and we will colour
+            """Code for plotting a series of PCoAs for the sample distances and we will colour
             them according to the meta info"""
             def __init__(self, parent):
                 self.parent = parent
@@ -1471,7 +1471,7 @@ class RestrepoAnalysis:
                 self.ax_arr = [[] for _ in range(5)]
                 self.clade_proportion_ax = []
                 self.leg_axarr = []
-                self.meta_info_categories = list(self.parent.metadata_info_df)
+                self.meta_info_categories = list(self.parent.experimental_metadata_info_df)
 
                 self._setup_axarr()
 
@@ -1574,7 +1574,7 @@ class RestrepoAnalysis:
 
                     uid_list = self.parent.clade_prop_pcoa_coords.index.values.tolist()[:-1]
                     for smp_uid in uid_list:
-                        meta_value = self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]
+                        meta_value = self.parent.experimental_metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]
                         color_list.append(self.parent.old_color_dict[meta_value])
 
                     self.ax_arr[i][3].scatter(x=self.parent.clade_prop_pcoa_coords['PC1'][:-1],
@@ -1586,7 +1586,7 @@ class RestrepoAnalysis:
                 for j in range(len(self.parent.clades)):  # for each clade
                     # We need to compute the pcoa coords for each clade. These will be the points plotted in the
                     # scatter for each of the different meta info for each clade
-                    sample_clade_dist_df = self.parent.sample_clade_dist_df_dict[self.parent.clades[j]]
+                    sample_clade_dist_df = self.parent.between_sample_clade_dist_df_dict[self.parent.clades[j]]
                     pcoa_output = pcoa(sample_clade_dist_df)
                     eig_tots = sum(pcoa_output.eigvals)
                     pc_one_var = pcoa_output.eigvals[0] / eig_tots
@@ -1601,10 +1601,10 @@ class RestrepoAnalysis:
                         #         color_list.append("#{0:02x}{1:02x}{2:02x}".format(r, g, b))
                         # else:
                         for smp_uid in list(sample_clade_dist_df):
-                            color_list.append(self.parent.old_color_dict[self.parent.metadata_info_df.loc[
+                            color_list.append(self.parent.old_color_dict[self.parent.experimental_metadata_info_df.loc[
                                 smp_uid, self.meta_info_categories[i]]])
 
-                        self.ax_arr[i][j].scatter(x=pcoa_output.samples['PC1'], y=pcoa_output.samples['PC2'],
+                        self.ax_arr[i][j].scatter(x=pcoa_output.samples['PC1']*100, y=pcoa_output.samples['PC2']*100,
                                                   marker='.', c=color_list, s=40, alpha=0.7, edgecolors='none')
                         self._write_var_explained(i, self.ax_arr[i][j], pc_one_var, pc_two_var)
 
@@ -1654,9 +1654,11 @@ class RestrepoAnalysis:
                         prop_tup = tuple([val/tot for val in vals])
                         self.tax_point.scatter([prop_tup], marker='o', color='black', s=20, alpha=0.5)
                 plt.savefig(os.path.join(self.parent.figure_dir, 'ternary_figure.png'), dpi=1200)
+                plt.savefig(os.path.join(self.parent.figure_dir, 'ternary_figure.svg'), dpi=1200)
 
         tp = TernaryPlot(parent=self)
         tp._plot_ternary_points()
+        foo = 'bar'
 
     def make_dendrogram_with_meta_all_clades_sample_dists(self):
         """ We will produce a similar figure to the one that we have already produced for the types."""
@@ -2082,7 +2084,7 @@ class RestrepoAnalysis:
 
         apples = 'asdf'
         # order: dendro, label, species, depth, reef_type, season
-        widths = [12,26,7,6,3,3,2]
+        widths = [12,32,7,6,3,3,2]
         axarr = self._setup_grid_spec_and_axes_for_dendro_and_meta_fig_all_clades(widths, high_low)
         for i in range(len(self.clades)):
             self._make_dendrogram_with_meta_fig_for_all_clades(i, axarr, high_low)
@@ -2280,6 +2282,7 @@ class RestrepoAnalysis:
         axarr[0].spines['top'].set_visible(False)
         axarr[0].spines['bottom'].set_visible(False)
         axarr[0].spines['left'].set_visible(False)
+        axarr[0].set_xticks([])
 
     def _plot_labels_plot_for_dendro_and_meta_fig(self, dend_ax, dendro_info, labels_ax):
         # make the x axis limits of the labels plot exactly the same as the dendrogram plot
@@ -2859,45 +2862,46 @@ class RestrepoAnalysis:
             meta_info_df_for_clade.to_csv(
                 path_or_buf=output_path_meta_info, sep=',', header=True, index=False, line_terminator='\n')
 
-    def permute_sample_permanova(self, dist_method='braycurtis'):
+    def permute_sample_permanova(self):
         meta_df = self.experimental_metadata_info_df
         for clade in self.clades:
 
             clade_sample_dist_df = self.between_sample_clade_dist_df_dict[clade]
-            if dist_method == 'braycurtis':
+            if self.seq_distance_method == 'braycurtis':
 
                 if self.remove_se and clade == 'D' and not self.maj_only:
                     clade_sample_dist_df = self._remove_se_from_df(clade_sample_dist_df)
-                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_bc_no_se.csv')
+                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_{self.seq_distance_method}_no_se.csv')
                 elif self.maj_only:
                     clade_sample_dist_df = self._remove_non_maj_from_df(clade_sample_dist_df=clade_sample_dist_df, clade=clade)
                     output_path_dist_matrix = os.path.join(self.outputs_dir,
-                                                           f'dists_permanova_samples_{clade}_bc_only_maj.csv')
+                                                           f'dists_permanova_samples_{clade}_{self.seq_distance_method}_only_maj.csv')
                 else:
-                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_bc.csv')
+                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_{self.seq_distance_method}.csv')
 
 
             else: # dist_method == 'unifrac'
                 if self.remove_se and clade == 'D' and not self.maj_only:
                     clade_sample_dist_df = self._remove_se_from_df(clade_sample_dist_df)
-                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_unif_no_se.csv')
+                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_{self.seq_distance_method}_no_se.csv')
                 elif self.maj_only:
                     clade_sample_dist_df = self._remove_non_maj_from_df(clade_sample_dist_df=clade_sample_dist_df, clade=clade)
                     output_path_dist_matrix = os.path.join(self.outputs_dir,
-                                                           f'dists_permanova_samples_{clade}_unif_only_maj.csv')
+                                                           f'dists_permanova_samples_{clade}_{self.seq_distance_method}_only_maj.csv')
                 else:
-                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_unif.csv')
+                    output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_{self.seq_distance_method}.csv')
 
             clade_sample_dist_df.to_csv(path_or_buf=output_path_dist_matrix, sep=',', header=False, index=False, line_terminator='\n')
 
             meta_info_df_for_clade = meta_df.loc[clade_sample_dist_df.index.values.tolist(), :]
 
             if self.remove_se and clade == 'D' and not self.maj_only:
-                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_no_se.csv')
+                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_{self.seq_distance_method}_no_se.csv')
             elif self.maj_only:
-                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_only_maj.csv')
+                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_{self.seq_distance_method}_only_maj.csv')
             else:
-                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}.csv')
+                output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_{self.seq_distance_method}.csv')
+
 
             # # If you want to append shuffled versions of the meta then you can use the code below
             # output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_shuffled.csv')
@@ -3133,7 +3137,7 @@ class RestrepoAnalysis:
         """This method will be used to investigate the pairwise comparisons that have shown significant
         PERMDISP test results. It will look at how balanced the factors are and what the dispersion looks like"""
 
-        self._assess_balance_and_variance_clade_prop()
+        # self._assess_balance_and_variance_clade_prop()
 
         # we will strip the between sample matrices of non-maj samples if self.maj_only is true before assessing
         # variances as below
@@ -3339,7 +3343,7 @@ class MetaInfoPlotter:
         # these are the axes that will hold the subcategory labels
         self.sub_cat_axarr = sub_cat_axarr
         # set the x axis lims to match the dend_ax
-        for ax, cat_ax, label, labpad in zip(self.meta_axarr, self.sub_cat_axarr, ['Species', 'Reef' ,'Depth', 'Reef\nType', 'Season'], [0,10,0,10,0]):
+        for ax, cat_ax, label, labpad in zip(self.meta_axarr, self.sub_cat_axarr, ['Species', 'Reef','Reef\nType', 'Depth', 'Season'], [0,10,0,10,0]):
             ax.set_ylim(dend_ax.get_ylim())
             # ax.spines['top'].set_visible(False)
             # ax.spines['bottom'].set_visible(False)
@@ -3392,18 +3396,18 @@ class MetaInfoPlotter:
     def plot_depth_meta(self):
         color_dict = {
             1:'#CAE1FF', 15: '#2E37FE', 30: '#000080'}
-        category_list = [30, 15, 1]
-        category_labels = ['30 m', '15 m', '1 m']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], cat_ax=self.sub_cat_axarr[2],color_dict=self.parent.old_color_dict,
+        category_list = [1, 15, 30]
+        category_labels = ['1 m', '15 m', '30 m']
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], cat_ax=self.sub_cat_axarr[3],color_dict=self.parent.old_color_dict,
                                                category_list=category_list, category_df_header='depth', category_labels=category_labels)
         self.depth_plotter.plot()
 
     def plot_reef_type(self):
         color_dict = {
             'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000'}
-        category_list = ['Offshore', 'Midshelf', 'Inshore']
-        category_labels = ['Offshore', 'Midshelf', 'Inshore']
-        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[3], cat_ax=self.sub_cat_axarr[3],color_dict=self.parent.old_color_dict,
+        category_list = ['Inshore', 'Midshelf', 'Offshore']
+        category_labels = ['Inshore', 'Midshelf', 'Offshore']
+        self.depth_plotter = self.CatPlotter(parent_meta_plotter=self, ax=self.meta_axarr[2], cat_ax=self.sub_cat_axarr[2],color_dict=self.parent.old_color_dict,
                                              category_list=category_list, category_df_header='reef_type', category_labels=category_labels)
         self.depth_plotter.plot()
 
@@ -3501,7 +3505,7 @@ class MetaInfoPlotter:
 
 
 if __name__ == "__main__":
-    rest_analysis = RestrepoAnalysis(cutoff_abund=0.05, remove_se=True, maj_only=True, remove_se_clade_props=True)
+    rest_analysis = RestrepoAnalysis(cutoff_abund=0.05, remove_se=False, maj_only=False, remove_se_clade_props=True, seq_distance_method='unifrac')
     # When we ran the analysis of variance ratios within the context of the between sample distance permanova analysis
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
@@ -3515,22 +3519,22 @@ if __name__ == "__main__":
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     # code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
     # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
-    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='high')
+    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='low')
     # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
     # rest_analysis.report_on_reef_type_effect_metrics()
     # rest_analysis.make_networks()
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
-    rest_analysis.output_seq_analysis_overview_outputs()
-
-    # rest_analysis.plot_pcoa_of_cladal()
+    # rest_analysis.output_seq_analysis_overview_outputs()
+    rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
     # rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
-    # rest_analysis.permute_sample_permanova(dist_method='unifrac')
+    # rest_analysis.permute_sample_permanova()
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_profile_permanova()
     # rest_analysis.histogram_of_all_abundance_values()
+    # rest_analysis.plot_ternary_clade_proportions()
 
 
 
