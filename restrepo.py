@@ -64,6 +64,9 @@ import statistics
 from multiprocessing import Pool
 from statistics import variance
 from sklearn import linear_model
+import re
+import seaborn as sns
+import scipy.stats
 
 def braycurtis_tup(u_v_tup, w=None):
     import scipy.spatial.distance as distance
@@ -252,6 +255,14 @@ class RestrepoAnalysis:
         self._populate_clade_dist_df_dict(cct_specific='low')
         # here we should have all of the items that we'll want to be passing into the dendrogram figure
 
+        # we will also create a profile abundance df that is only the <0.05 profiles so that we can have a look
+        # at them and see how genuine these
+        self.profile_abundance_df_cutoff_background = None
+        self.prof_uid_to_local_abund_dict_cutoff_background = {}
+        self.profile_distance_df_dict_cutoff_background = {}
+        self._create_profile_df_with_cutoff_high_low(cutoff_low=0.00, cutoff_high=0.05)
+        self.get_list_of_clade_col_type_uids_for_unifrac(high_low='background')
+        self._populate_clade_dist_df_dict(cct_specific='background')
 
         # Temperature dataframe
         self.temperature_df = None
@@ -372,6 +383,139 @@ class RestrepoAnalysis:
 
         # for network in
 
+    def investigate_background(self):
+        """ This will be code associated with having an initial investigation of the low level ITS2 type profile
+        1 - The first thing will be to look at how well defined the low level ITS2 type profiles"""
+        # do a clade count to see how these profile instances are split over the clades
+        dd_clade_count = defaultdict(int)
+        div_count_distrb_list = []
+        for profile_uid in self.profile_abundance_df_cutoff_background.columns:
+            # get the name of the profile so that we can get the number of divs from that
+            name = self.profile_meta_info_df.loc[profile_uid]['ITS2 type profile']
+            div_count = len(re.split('-|/', name))
+            ser = self.profile_abundance_df_cutoff_background[profile_uid]
+            num_occurences = len(ser.iloc[ser.to_numpy().nonzero()].values.tolist())
+            div_count_distrb_list.extend([div_count for _ in range(num_occurences)])
+            dd_clade_count[self.profile_meta_info_df.at[profile_uid, 'Clade']] += num_occurences
+
+
+        # Linerize the values in the df for passing to the hist
+        f, axarr = plt.subplots(1, 3, figsize=(15, 5))
+
+        ax_zero_second = axarr[0].twinx()
+        sns.distplot(div_count_distrb_list, hist=False, kde=True,
+                     bins=50, color='darkblue',
+                     hist_kws={'edgecolor': 'black'},
+                     kde_kws={'linewidth': 2}, ax=ax_zero_second, norm_hist=False)
+        sns.distplot(div_count_distrb_list, hist=True, kde=False,
+                     bins=50, color='darkblue',
+                     hist_kws={'edgecolor': 'black'},
+                     kde_kws={'linewidth': 2}, ax=axarr[0], norm_hist=False)
+
+        # on the other plot plot the distribution of the number of divs found in types in general
+        num_divs_list = []
+        for profile_uid in self.profile_abundance_df:
+            name = self.profile_meta_info_df.loc[profile_uid]['ITS2 type profile']
+            num_divs_list.append(len(re.split('-|/', name)))
+
+        ax_one_second = axarr[1].twinx()
+        sns.distplot(num_divs_list, hist=False, kde=True,
+                     bins=50, color='darkblue',
+                     hist_kws={'edgecolor': 'black'},
+                     kde_kws={'linewidth': 2}, ax=ax_one_second, norm_hist=False)
+        sns.distplot(num_divs_list, hist=True, kde=False,
+                     bins=50, color='darkblue',
+                     hist_kws={'edgecolor': 'black'},
+                     kde_kws={'linewidth': 2}, ax=axarr[1], norm_hist=False)
+
+        foo = 'bar'
+
+        # we want to look at the correlation of aundandace of the background ITS2 type profiles versus the high
+        # cutoff profiles.
+        # I want to visualise this using a scatter plot.
+        low_sample_num = []
+        high_sample_num = []
+        found_low_not_high = 0
+        found_high_not_low = 0
+        low_tot = len(self.profile_abundance_df_cutoff_background.columns.values.tolist())
+        high_tot = len(self.profile_abundance_df_cutoff_high.columns.values.tolist())
+        for profile_uid_back in self.profile_abundance_df_cutoff_background.columns:
+            ser_back = self.profile_abundance_df_cutoff_background[profile_uid_back]
+            num_occurences_back = len(ser_back.iloc[ser_back.to_numpy().nonzero()].values.tolist())
+            low_sample_num.append(num_occurences_back)
+            if profile_uid_back in self.profile_abundance_df_cutoff_high:
+                ser_high = self.profile_abundance_df_cutoff_high[profile_uid_back]
+                num_occurences_high = len(ser_high.iloc[ser_high.to_numpy().nonzero()].values.tolist())
+                high_sample_num.append(num_occurences_high)
+                if num_occurences_back > 20 and num_occurences_high < 5:
+                    profile_name = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type profile']
+                    local = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance local']
+                    global_abund = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance DB']
+                    print(
+                        f'interesting profile {profile_name} that was found in the background collection at an abundance of {num_occurences_back} and was found at an abundance of {num_occurences_high} in the high, had a local abundance of {local} and a global abundance of {global_abund}')
+            else:
+                found_low_not_high += 1
+                high_sample_num.append(0)
+                if num_occurences_back > 20:
+                    profile_name = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type profile']
+                    local = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance local']
+                    global_abund = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance DB']
+                    print(f'interesting profile {profile_name} that was found in the background collection at an abundance of {num_occurences_back} and was found at an abundance of 0 in the high, had a local abundance of {local} and a global abundance of {global_abund}')
+        # now populate with the uids that were found in the high abundance but not in the
+        for uid_high in self.profile_abundance_df_cutoff_high.columns:
+            if uid_high not in self.profile_abundance_df_cutoff_background:
+                ser_high = self.profile_abundance_df_cutoff_high[uid_high]
+                num_occurences_high = len(ser_high.iloc[ser_high.to_numpy().nonzero()].values.tolist())
+                high_sample_num.append(num_occurences_high)
+                low_sample_num.append(0)
+                found_high_not_low += 1
+
+
+        axarr[2].scatter(x=low_sample_num, y=high_sample_num, marker='o', color='black', s=20, alpha=0.1)
+        axarr[2].set_xlabel('background_profile_abundances')
+        axarr[2].set_ylabel('high_profile_abundances')
+        axarr[2].set_ylim(-2,50)
+        axarr[2].set_xlim(-2,50)
+        f.tight_layout()
+
+        # how many of the profiles from the background were found in the high
+        print(f'{low_tot-found_low_not_high} out of {low_tot} ({(low_tot-found_low_not_high)/low_tot}) of the low profiles were found in the high.')
+        # how many of the high were found in the background
+        print(f'{high_tot - found_high_not_low} out of {high_tot} ({(high_tot - found_high_not_low) / high_tot}) of the high profiles were found in the low.')
+
+
+        # do regressions of number of samples found in versus the number of species they were found in
+        # for both the background and high collections
+        x_back = []
+        y_back = []
+        x_high = []
+        y_high = []
+
+        for uid_back in self.profile_abundance_df_cutoff_background.columns:
+            ser_back = self.profile_abundance_df_cutoff_background[uid_back]
+            ser_back_non_zero_ind = ser_back[ser_back > 0].index.values.tolist()
+            list_of_speceies = [self.experimental_metadata_info_df.at[smp_uid, 'species'] for smp_uid in ser_back_non_zero_ind]
+            set_of_species = set(list_of_speceies)
+            x_back.append(len(list_of_speceies))
+            y_back.append(len(set_of_species))
+
+        for uid_high in self.profile_abundance_df_cutoff_high.columns:
+            ser_high = self.profile_abundance_df_cutoff_high[uid_high]
+            ser_high_non_zero_ind = ser_high[ser_high > 0].index.values.tolist()
+            list_of_speceies = [self.experimental_metadata_info_df.at[smp_uid, 'species'] for smp_uid in ser_high_non_zero_ind]
+            set_of_species = set(list_of_speceies)
+            x_high.append(len(list_of_speceies))
+            y_high.append(len(set_of_species))
+
+
+        slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(x=x_back, y=y_back)
+        slope_2, intercept_2, r_value_2, p_value_2, std_err_2 = scipy.stats.linregress(x=x_high, y=y_high)
+
+        foo = 'bar'
+
+        # colour the points by number of codom seqs in the profile (on averge) and
+
+
     def report_on_reef_type_effect_metrics(self):
         """This will report on the proportion of ITS2 type profile instances that were found in both reefs belonging
         to a given reef type divided by the total number of instances for those two reef types. We will use this metric
@@ -420,7 +564,7 @@ class RestrepoAnalysis:
         print(score)
         print(f'The R2 value for number of samples predicting number of reefs was: {score}')
 
-        import scipy.stats
+
 
         X = x_y_df['num_samples']
         y = x_y_df['num_reefs']
@@ -590,6 +734,16 @@ class RestrepoAnalysis:
             'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'A', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_A.dist'),
             'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'C', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_C.dist'),
             'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_braycurtis_cct_005', 'D', '2019-07-21_01-14-05.826803.bray_curtis_within_clade_profile_distances_D.dist')
+        }
+
+        # Paths to the cct specific distances at < 0.05 with unifrac
+        self.between_profile_clade_dist_cct_background_unifrac_specific_path_dict = {
+            'A': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_background', 'A',
+                              '2019-08-25_05-16-01.568715_unifrac_btwn_profile_distances_A.dist'),
+            'C': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_background', 'C',
+                              '2019-08-25_05-16-01.568715_unifrac_btwn_profile_distances_C.dist'),
+            'D': os.path.join(self.base_sp_output_dir, 'between_profile_distances_unifrac_cct_background', 'D',
+                              '2019-08-25_05-16-01.568715_unifrac_btwn_profile_distances_D.dist')
         }
 
         # Paths to the cct specific distances at abundances between 0.05 and 0.40 unifrac
@@ -888,6 +1042,7 @@ class RestrepoAnalysis:
                 self.clade_proportion_df.drop(index=uid, inplace=True, errors='ignore')
                 self.clade_proportion_df_non_normalised.drop(index=uid, inplace=True, errors='ignore')
                 self.seq_meta_data_df.drop(index=uid, inplace=True, errors='ignore')
+
                 if self.profile_abundance_df_cutoff is not None:
                     self.profile_abundance_df_cutoff.drop(index=uid, inplace=True, errors='ignore')
                 if self.between_sample_clade_dist_df_dict:
@@ -897,6 +1052,7 @@ class RestrepoAnalysis:
                             self.between_sample_clade_dist_df_dict[clade].drop(columns=uid, inplace=True, errors='ignore')
                 self.profile_abundance_df_cutoff_high.drop(index=uid, inplace=True, errors='ignore')
                 self.profile_abundance_df_cutoff_low.drop(index=uid, inplace=True, errors='ignore')
+                self.profile_abundance_df_cutoff_background.drop(index=uid, inplace=True, errors='ignore')
                 break
 
     def _del_problem_sample_from_a_df(self, df=None, list_of_dfs=None):
@@ -1294,6 +1450,11 @@ class RestrepoAnalysis:
                         file=open(os.path.join(self.cache_dir,
                                                f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'),
                                   'rb'))
+                elif cct_specific == 'background':
+                    self.profile_distance_df_dict_cutoff_background = pickle.load(
+                        file=open(os.path.join(self.cache_dir,
+                                               f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'),
+                                  'rb'))
                 else:
                     if cct_specific == '040':
                         self.profile_distance_df_dict_cutoff_high = pickle.load(
@@ -1318,7 +1479,8 @@ class RestrepoAnalysis:
                 path_dict_to_use = self.between_sample_clade_dist_path_dict_unifrac
         elif cct_specific == 'low':
             path_dict_to_use = self.between_profile_clade_dist_cct_low_unifrac_specific_path_dict
-
+        elif cct_specific == 'background':
+            path_dict_to_use = self.between_profile_clade_dist_cct_background_unifrac_specific_path_dict
         elif cct_specific == '005':
             if self.profile_distance_method == 'braycurtis':
                 path_dict_to_use = self.between_profile_clade_dist_cct_005_braycurtis_specific_path_dict
@@ -1355,6 +1517,8 @@ class RestrepoAnalysis:
             elif cct_specific:
                 if cct_specific == 'low':
                     self.profile_distance_df_dict_cutoff_low[clade] = df.astype(dtype='float')
+                elif cct_specific == 'background':
+                    self.profile_distance_df_dict_cutoff_background[clade] = df.astype(dtype='float')
                 else:
                     self.between_profile_clade_dist_cct_specific_df_dict[clade] = df.astype(dtype='float')
                     if cct_specific == '040':
@@ -1369,6 +1533,11 @@ class RestrepoAnalysis:
         elif cct_specific:
             if cct_specific == 'low':
                 pickle.dump(obj=self.profile_distance_df_dict_cutoff_low,
+                            file=open(os.path.join(self.cache_dir,
+                                                   f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'),
+                                      'wb'))
+            elif cct_specific == 'background':
+                pickle.dump(obj=self.profile_distance_df_dict_cutoff_background,
                             file=open(os.path.join(self.cache_dir,
                                                    f'clade_dist_cct_{cct_specific}_{self.profile_distance_method}_specific_dict.p'),
                                       'wb'))
@@ -2077,8 +2246,10 @@ class RestrepoAnalysis:
         This link for doing the transofrmations into the correct coordinates space:
         https://matplotlib.org/users/transforms_tutorial.html
         """
-
-        fig = plt.figure(figsize=(7, 12))
+        if high_low == 'background':
+            fig = plt.figure(figsize=(7, 14))
+        else:
+            fig = plt.figure(figsize=(7, 12))
         # required for getting the bbox of the text annotations
         fig.canvas.draw()
 
@@ -2109,6 +2280,10 @@ class RestrepoAnalysis:
             profile_abund_cutoff = self.profile_abundance_df_cutoff_high
             between_profile_clade_dist_cct_specific_df_dict = self.profile_distance_df_dict_cutoff_high
             prof_uid_to_local_abund_dict_post_cutoff = self.prof_uid_to_local_abund_dict_cutoff_high
+        elif high_low == 'background':
+            profile_abund_cutoff = self.profile_abundance_df_cutoff_background
+            between_profile_clade_dist_cct_specific_df_dict = self.profile_distance_df_dict_cutoff_background
+            prof_uid_to_local_abund_dict_post_cutoff = self.prof_uid_to_local_abund_dict_cutoff_background
         else: # abund cuttoff == low
             profile_abund_cutoff = self.profile_abundance_df_cutoff_low
             between_profile_clade_dist_cct_specific_df_dict = self.profile_distance_df_dict_cutoff_low
@@ -2363,6 +2538,8 @@ class RestrepoAnalysis:
             profile_abund_cutoff = self.profile_abundance_df_cutoff
         elif high_low == 'high':
             profile_abund_cutoff = self.profile_abundance_df_cutoff_high
+        elif high_low == 'background':
+            profile_abund_cutoff = self.profile_abundance_df_cutoff_background
         else: # abund cuttoff == low
             profile_abund_cutoff = self.profile_abundance_df_cutoff_low
 
@@ -2547,7 +2724,7 @@ class RestrepoAnalysis:
         removed. We will look to see how many profiles this discounts from the analysis.
         """
 
-        import seaborn as sns
+
 
         # Linerize the values in the df for passing to the hist
         f, ax_arr = plt.subplots(1, 2, figsize=(10, 5))
@@ -2634,7 +2811,13 @@ class RestrepoAnalysis:
         """Creates a new df from the old df that has all of the values below the cutoff_abundance threshold
         made to 0. We will also calculate a new prof_uid_to_local_abund_dict_post_cutoff dictionary.
         """
-        if cutoff_high:# we are making the lower associations set
+        if cutoff_high == 0.05: # we are making the background associations set
+            if os.path.exists(os.path.join(self.cache_dir, 'profile_df_cutoff_background.p')):
+                self.profile_abundance_df_cutoff_background = pickle.load(open(os.path.join(self.cache_dir, 'profile_df_cutoff_background.p'), 'rb'))
+                self.prof_uid_to_local_abund_dict_cutoff_background = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_cutoff_background.p'), 'rb'))
+            else:
+                self._create_prof_abund_high_low_from_scratch_and_pickle_out(cutoff_high, cutoff_low)
+        elif cutoff_high == 0.40:# we are making the lower associations set
             if os.path.exists(os.path.join(self.cache_dir, 'profile_df_cutoff_low.p')):
                 self.profile_abundance_df_cutoff_low = pickle.load(open(os.path.join(self.cache_dir, 'profile_df_cutoff_low.p'), 'rb'))
                 self.prof_uid_to_local_abund_dict_cutoff_low = pickle.load(open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_cutoff_low.p'), 'rb'))
@@ -2657,12 +2840,20 @@ class RestrepoAnalysis:
         for i in list(profile_abundance_df_cutoff):  # for each column of the df
             temp_series = profile_abundance_df_cutoff[i]
             local_count = len(temp_series[temp_series > 0].index.values.tolist())
-            if cutoff_high:
+            if cutoff_high == 0.05:
+                self.prof_uid_to_local_abund_dict_cutoff_background[i] = local_count
+            elif cutoff_high == 0.40:
                 self.prof_uid_to_local_abund_dict_cutoff_low[i] = local_count
             else:
                 self.prof_uid_to_local_abund_dict_cutoff_high[i] = local_count
         # dump
-        if cutoff_high:
+        if cutoff_high == 0.05:
+            self.profile_abundance_df_cutoff_background = profile_abundance_df_cutoff
+            pickle.dump(self.profile_abundance_df_cutoff_background,
+                        open(os.path.join(self.cache_dir, 'profile_df_cutoff_background.p'), 'wb'))
+            pickle.dump(self.prof_uid_to_local_abund_dict_cutoff_background,
+                        open(os.path.join(self.cache_dir, 'prof_uid_to_local_abund_dict_cutoff_background.p'), 'wb'))
+        elif cutoff_high == 0.40:
             self.profile_abundance_df_cutoff_low = profile_abundance_df_cutoff
             pickle.dump(self.profile_abundance_df_cutoff_low,
                         open(os.path.join(self.cache_dir, 'profile_df_cutoff_low.p'), 'wb'))
@@ -2725,8 +2916,9 @@ class RestrepoAnalysis:
 
     def _mask_values_and_remove_0_cols(self, cutoff_high, cutoff_low, profile_abundance_df_cutoff):
         # change values below cutoff to 0
-        profile_abundance_df_cutoff = profile_abundance_df_cutoff.mask(
-            cond=profile_abundance_df_cutoff <= cutoff_low, other=0)
+        if cutoff_low != 0:
+            profile_abundance_df_cutoff = profile_abundance_df_cutoff.mask(
+                cond=profile_abundance_df_cutoff <= cutoff_low, other=0)
         if cutoff_high:
             profile_abundance_df_cutoff = profile_abundance_df_cutoff.mask(
                 cond=profile_abundance_df_cutoff > cutoff_high, other=0)
@@ -2766,7 +2958,13 @@ class RestrepoAnalysis:
         # into the distance functions of SymPortal that we are going to make.
         # we should make seperate outputs for bray vs unifrac, unifrac sqrt trans formed and not.
 
-        if high_low == 'low':
+        if high_low == 'background':
+            ### Then we are getting the tups specifically for the set of profiles that are below 0.05 in abundance
+            index_column_tups = list(
+                self.profile_abundance_df_cutoff_background[self.profile_abundance_df_cutoff_background > 0].stack().index)
+
+            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_background')
+        elif high_low == 'low':
             ### Then we are getting the tups specifically for the set of profiles that are within 0.05 and 0.40 abundance
             index_column_tups = list(
                 self.profile_abundance_df_cutoff_low[self.profile_abundance_df_cutoff_low > 0].stack().index)
@@ -3510,8 +3708,6 @@ if __name__ == "__main__":
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
 
-
-
     # run this to generate the dss and at id tuples that we can use in the SymPortal shell to get the specific
     # clade collection types that we can then generate distances from to make the dendrogram figure
     # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
@@ -3519,13 +3715,13 @@ if __name__ == "__main__":
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
     # code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
     # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
-    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='low')
+    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='background')
     # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
     # rest_analysis.report_on_reef_type_effect_metrics()
     # rest_analysis.make_networks()
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
-    rest_analysis.plot_pcoa_of_cladal()
+    # rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
     # rest_analysis.make_sample_balance_figure()
@@ -3534,7 +3730,8 @@ if __name__ == "__main__":
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_profile_permanova()
     # rest_analysis.histogram_of_all_abundance_values()
-    # rest_analysis.plot_ternary_clade_proportions()
+    rest_analysis.investigate_background()
+    # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
 
 
 
