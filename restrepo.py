@@ -387,6 +387,9 @@ class RestrepoAnalysis:
         """ This will be code associated with having an initial investigation of the low level ITS2 type profile
         1 - The first thing will be to look at how well defined the low level ITS2 type profiles"""
         # do a clade count to see how these profile instances are split over the clades
+
+
+
         dd_clade_count = defaultdict(int)
         div_count_distrb_list = []
         for profile_uid in self.profile_abundance_df_cutoff_background.columns:
@@ -400,9 +403,9 @@ class RestrepoAnalysis:
 
 
         # Linerize the values in the df for passing to the hist
-        f, axarr = plt.subplots(1, 3, figsize=(15, 5))
+        f, axarr = plt.subplots(2, 3, figsize=(15, 9))
 
-        ax_zero_second = axarr[0].twinx()
+        ax_zero_second = axarr[0][0].twinx()
         sns.distplot(div_count_distrb_list, hist=False, kde=True,
                      bins=50, color='darkblue',
                      hist_kws={'edgecolor': 'black'},
@@ -410,15 +413,19 @@ class RestrepoAnalysis:
         sns.distplot(div_count_distrb_list, hist=True, kde=False,
                      bins=50, color='darkblue',
                      hist_kws={'edgecolor': 'black'},
-                     kde_kws={'linewidth': 2}, ax=axarr[0], norm_hist=False)
+                     kde_kws={'linewidth': 2}, ax=axarr[0][0], norm_hist=False)
 
-        # on the other plot plot the distribution of the number of divs found in types in general
+        # on the other plot plot the distribution of the number of divs found in types in above the 0.05 cutoff
         num_divs_list = []
         for profile_uid in self.profile_abundance_df:
             name = self.profile_meta_info_df.loc[profile_uid]['ITS2 type profile']
-            num_divs_list.append(len(re.split('-|/', name)))
+            div_count = len(re.split('-|/', name))
+            ser = self.profile_abundance_df[profile_uid]
+            ser = ser[ser>0.05]
+            num_occurences = len(ser)
+            num_divs_list.extend([div_count for _ in range(num_occurences)])
 
-        ax_one_second = axarr[1].twinx()
+        ax_one_second = axarr[0][1].twinx()
         sns.distplot(num_divs_list, hist=False, kde=True,
                      bins=50, color='darkblue',
                      hist_kws={'edgecolor': 'black'},
@@ -426,62 +433,77 @@ class RestrepoAnalysis:
         sns.distplot(num_divs_list, hist=True, kde=False,
                      bins=50, color='darkblue',
                      hist_kws={'edgecolor': 'black'},
-                     kde_kws={'linewidth': 2}, ax=axarr[1], norm_hist=False)
-
+                     kde_kws={'linewidth': 2}, ax=axarr[0][1], norm_hist=False)
+        ax_one_second.set_ylim(0,0.25)
+        ax_zero_second.set_ylim(0,0.25)
         foo = 'bar'
 
         # we want to look at the correlation of aundandace of the background ITS2 type profiles versus the high
         # cutoff profiles.
         # I want to visualise this using a scatter plot.
-        low_sample_num = []
-        high_sample_num = []
-        found_low_not_high = 0
-        found_high_not_low = 0
-        low_tot = len(self.profile_abundance_df_cutoff_background.columns.values.tolist())
-        high_tot = len(self.profile_abundance_df_cutoff_high.columns.values.tolist())
+        # this should compare whether the background profile abundances are found in both the high profile and the low profile
+        back_sample_num = []
+        high_low_sample_num = []
+        found_back_not_high_low = 0
+        found_high_low_not_back = 0
+        found_both = 0
+        back_tot = len(self.profile_abundance_df_cutoff_background.columns.values.tolist())
+        high_low_tot = len(set(self.profile_abundance_df_cutoff_high.columns.values.tolist() + self.profile_abundance_df_cutoff_low.columns.values.tolist()))
         for profile_uid_back in self.profile_abundance_df_cutoff_background.columns:
             ser_back = self.profile_abundance_df_cutoff_background[profile_uid_back]
             num_occurences_back = len(ser_back.iloc[ser_back.to_numpy().nonzero()].values.tolist())
-            low_sample_num.append(num_occurences_back)
-            if profile_uid_back in self.profile_abundance_df_cutoff_high:
-                ser_high = self.profile_abundance_df_cutoff_high[profile_uid_back]
-                num_occurences_high = len(ser_high.iloc[ser_high.to_numpy().nonzero()].values.tolist())
-                high_sample_num.append(num_occurences_high)
-                if num_occurences_back > 20 and num_occurences_high < 5:
-                    profile_name = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type profile']
-                    local = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance local']
-                    global_abund = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance DB']
-                    print(
-                        f'interesting profile {profile_name} that was found in the background collection at an abundance of {num_occurences_back} and was found at an abundance of {num_occurences_high} in the high, had a local abundance of {local} and a global abundance of {global_abund}')
+            back_sample_num.append(num_occurences_back)
+            if profile_uid_back in self.profile_abundance_df_cutoff_high or profile_uid_back in self.profile_abundance_df_cutoff_low:
+                found_both += 1
+                num_occurences_high = 0
+                num_occurences_low = 0
+                if profile_uid_back in self.profile_abundance_df_cutoff_high:
+                    ser_high = self.profile_abundance_df_cutoff_high[profile_uid_back]
+                    num_occurences_high = len(ser_high.iloc[ser_high.to_numpy().nonzero()].values.tolist())
+                if profile_uid_back in self.profile_abundance_df_cutoff_low:
+                    ser_low = self.profile_abundance_df_cutoff_low[profile_uid_back]
+                    num_occurences_low = len(ser_low.iloc[ser_low.to_numpy().nonzero()].values.tolist())
+                num_occurences_high_low = num_occurences_high + num_occurences_low
+                high_low_sample_num.append(num_occurences_high_low)
             else:
-                found_low_not_high += 1
-                high_sample_num.append(0)
+                found_back_not_high_low += 1
+                high_low_sample_num.append(0)
                 if num_occurences_back > 20:
                     profile_name = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type profile']
                     local = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance local']
                     global_abund = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance DB']
                     print(f'interesting profile {profile_name} that was found in the background collection at an abundance of {num_occurences_back} and was found at an abundance of 0 in the high, had a local abundance of {local} and a global abundance of {global_abund}')
+
         # now populate with the uids that were found in the high abundance but not in the
-        for uid_high in self.profile_abundance_df_cutoff_high.columns:
-            if uid_high not in self.profile_abundance_df_cutoff_background:
-                ser_high = self.profile_abundance_df_cutoff_high[uid_high]
-                num_occurences_high = len(ser_high.iloc[ser_high.to_numpy().nonzero()].values.tolist())
-                high_sample_num.append(num_occurences_high)
-                low_sample_num.append(0)
-                found_high_not_low += 1
+        for uid_high_low in set(self.profile_abundance_df_cutoff_high.columns.values.tolist() + self.profile_abundance_df_cutoff_low.columns.values.tolist()):
+            if uid_high_low not in self.profile_abundance_df_cutoff_background:
+                num_occurences_high = 0
+                num_occurences_low = 0
+                if uid_high_low in self.profile_abundance_df_cutoff_high:
+                    ser_high = self.profile_abundance_df_cutoff_high[uid_high_low]
+                    num_occurences_high = len(ser_high.iloc[ser_high.to_numpy().nonzero()].values.tolist())
+                if uid_high_low in self.profile_abundance_df_cutoff_low:
+                    ser_low = self.profile_abundance_df_cutoff_low[uid_high_low]
+                    num_occurences_low = len(ser_low.iloc[ser_low.to_numpy().nonzero()].values.tolist())
+                num_occurences_high_low = num_occurences_high + num_occurences_low
+                high_low_sample_num.append(num_occurences_high_low)
+                back_sample_num.append(0)
+                found_high_low_not_back += 1
 
+        from matplotlib_venn import venn2
+        venn2(subsets=(found_back_not_high_low,found_high_low_not_back ,found_both), set_labels=('background','non-background'), ax=axarr[1][2])
 
-        axarr[2].scatter(x=low_sample_num, y=high_sample_num, marker='o', color='black', s=20, alpha=0.1)
-        axarr[2].set_xlabel('background_profile_abundances')
-        axarr[2].set_ylabel('high_profile_abundances')
-        axarr[2].set_ylim(-2,50)
-        axarr[2].set_xlim(-2,50)
+        axarr[0][2].scatter(x=back_sample_num, y=high_low_sample_num, marker='o', color='black', s=20, alpha=0.1)
+        axarr[0][2].set_xlabel('background_profile_abundances')
+        axarr[0][2].set_ylabel('high_profile_abundances')
+        axarr[0][2].set_ylim(-2,50)
+        axarr[0][2].set_xlim(-2,50)
         f.tight_layout()
 
         # how many of the profiles from the background were found in the high
-        print(f'{low_tot-found_low_not_high} out of {low_tot} ({(low_tot-found_low_not_high)/low_tot}) of the low profiles were found in the high.')
+        print(f'{back_tot-found_back_not_high_low} out of {back_tot} ({(back_tot-found_back_not_high_low)/back_tot}) of the low profiles were found in the high.')
         # how many of the high were found in the background
-        print(f'{high_tot - found_high_not_low} out of {high_tot} ({(high_tot - found_high_not_low) / high_tot}) of the high profiles were found in the low.')
+        print(f'{high_low_tot - found_high_low_not_back} out of {high_low_tot} ({(high_low_tot - found_high_low_not_back) / high_low_tot}) of the high profiles were found in the low.')
 
 
         # do regressions of number of samples found in versus the number of species they were found in
@@ -499,8 +521,8 @@ class RestrepoAnalysis:
             x_back.append(len(list_of_speceies))
             y_back.append(len(set_of_species))
 
-        for uid_high in self.profile_abundance_df_cutoff_high.columns:
-            ser_high = self.profile_abundance_df_cutoff_high[uid_high]
+        for uid_high_low in self.profile_abundance_df_cutoff_high.columns:
+            ser_high = self.profile_abundance_df_cutoff_high[uid_high_low]
             ser_high_non_zero_ind = ser_high[ser_high > 0].index.values.tolist()
             list_of_speceies = [self.experimental_metadata_info_df.at[smp_uid, 'species'] for smp_uid in ser_high_non_zero_ind]
             set_of_species = set(list_of_speceies)
@@ -511,10 +533,223 @@ class RestrepoAnalysis:
         slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(x=x_back, y=y_back)
         slope_2, intercept_2, r_value_2, p_value_2, std_err_2 = scipy.stats.linregress(x=x_high, y=y_high)
 
+        # # I want to see what the local to global ratios look like for these background ratios.
+        # # a good way to do this is probably to plot the number of samples the profile was found in against
+        # # the local to global ratio
+        # x_local_global = []
+        # y_local_global = []
+        # for profile_uid_back in self.profile_abundance_df_cutoff_background.columns:
+        #     ser_back = self.profile_abundance_df_cutoff_background[profile_uid_back]
+        #     num_occurences_back = len(ser_back.iloc[ser_back.to_numpy().nonzero()].values.tolist())
+        #     low_sample_num.append(num_occurences_back)
+        #     local = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance local']
+        #     global_abund = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance DB']
+        #     x_local_global.append(num_occurences_back)
+        #     y_local_global.append(local/global_abund)
+        #
+        # axarr[1][0].scatter(x=x_local_global, y=y_local_global, marker='o', color='black', s=20, alpha=0.1)
+        # axarr[1][0].set_xlabel('number 0f samples found in')
+        # axarr[1][0].set_ylabel('local/global ratio')
+        # axarr[1][0].set_ylim(-0.02, 1.02)
+        # # axarr[1][0].set_xlim(-0.02, 1.02)
+        #
+        # # now compare this to the high abundance set of profiles
+        # # I want to see what the local to global ratios look like for these background ratios.
+        # # a good way to do this is probably to plot the number of samples the profile was found in against
+        # # the local to global ratio
+        # x_local_global = []
+        # y_local_global = []
+        # for profile_uid_back in self.profile_abundance_df_cutoff_high.columns:
+        #     ser_back = self.profile_abundance_df_cutoff_high[profile_uid_back]
+        #     num_occurences_back = len(ser_back.iloc[ser_back.to_numpy().nonzero()].values.tolist())
+        #     low_sample_num.append(num_occurences_back)
+        #     local = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance local']
+        #     global_abund = self.profile_meta_info_df.at[profile_uid_back, 'ITS2 type abundance DB']
+        #     x_local_global.append(num_occurences_back)
+        #     y_local_global.append(local / global_abund)
+        #
+        # axarr[1][1].scatter(x=x_local_global, y=y_local_global, marker='o', color='black', s=20, alpha=0.1)
+        # axarr[1][1].set_xlabel('number 0f samples found in')
+        # axarr[1][1].set_ylabel('local/global ratio')
+        # axarr[1][1].set_ylim(-0.02, 1.02)
+        # # axarr[1][1].set_xlim(-0.02, 1.02)
+
+        # I want to plot the number of sequences found against the percentage of the sample the clade collection
+        # made up. We will do this for all clade collections less than 10%
+        # we also want to see if the given minor clade collection had a profile found in it
+        x_rel_abund_yes = []
+        y_abs_seqs_yes = []
+        x_rel_abund_no = []
+        y_abs_seqs_no = []
+        x_rel_abund = []
+        y_abs_seqs = []
+        smp_count = 0
+        if os.path.exists(os.path.join(self.cache_dir, 'x_rel_abund_yes')):
+            x_rel_abund_yes = pickle.load(open(os.path.join(self.cache_dir, 'x_rel_abund_yes'), 'rb'))
+            y_abs_seqs_yes = pickle.load(open(os.path.join(self.cache_dir, 'y_abs_seqs_yes'), 'rb'))
+            x_rel_abund_no = pickle.load(open(os.path.join(self.cache_dir, 'x_rel_abund_no'), 'rb'))
+            y_abs_seqs_no = pickle.load(open(os.path.join(self.cache_dir, 'y_abs_seqs_no'), 'rb'))
+            x_rel_abund = pickle.load(open(os.path.join(self.cache_dir, 'x_rel_abund'), 'rb'))
+            y_abs_seqs = pickle.load(open(os.path.join(self.cache_dir, 'y_abs_seqs'), 'rb'))
+        else:
+            for smp_uid in self.seq_meta_data_df.index:
+                smp_count += 1
+                print(f'checking {smp_count}')
+                total_seqs = self.seq_meta_data_df.at[smp_uid, 'post_med_absolute']
+                clade_props_ser = self.clade_proportion_df_non_normalised.loc[smp_uid]
+                max_clade = clade_props_ser.idxmax()
+                for clade, clade_prop in clade_props_ser.items():
+                    if clade_prop > 0 and clade != max_clade:
+                        x_rel_abund.append(clade_prop)
+                        y_abs_seqs.append(clade_prop * total_seqs)
+                        # now check to see if the clade collection in question had a profile found in it
+                        has = []
+                        for df in [self.profile_abundance_df_cutoff_background, self.profile_abundance_df_cutoff_low, self.profile_abundance_df_cutoff_high]:
+                            has.append(self._check_if_cc_has_prof(clade, smp_uid, df=df))
+                        if True in has:
+                            if has[1] or has[2]:
+                                foo = 'asdf'
+                            x_rel_abund_yes.append(clade_prop)
+                            y_abs_seqs_yes.append(clade_prop*total_seqs)
+                        else:
+                            x_rel_abund_no.append(clade_prop)
+                            y_abs_seqs_no.append(clade_prop * total_seqs)
+            pickle.dump(x_rel_abund_yes, open(os.path.join(self.cache_dir, 'x_rel_abund_yes'), 'wb'))
+            pickle.dump(y_abs_seqs_yes, open(os.path.join(self.cache_dir, 'y_abs_seqs_yes'), 'wb'))
+            pickle.dump(x_rel_abund_no, open(os.path.join(self.cache_dir, 'x_rel_abund_no'), 'wb'))
+            pickle.dump(y_abs_seqs_no, open(os.path.join(self.cache_dir, 'y_abs_seqs_no'), 'wb'))
+            pickle.dump(x_rel_abund, open(os.path.join(self.cache_dir, 'x_rel_abund'), 'wb'))
+            pickle.dump(y_abs_seqs, open(os.path.join(self.cache_dir, 'y_abs_seqs'), 'wb'))
+
+        below_200_prop = len([_ for _ in y_abs_seqs if _ < 200]) / len(y_abs_seqs)
+        axarr[1][1].scatter(x=x_rel_abund_yes, y=y_abs_seqs_yes, marker='o', color='green', s=20, alpha=0.1, zorder=3)
+        axarr[1][1].scatter(x=x_rel_abund_no, y=y_abs_seqs_no, marker='o', color='black', s=20, alpha=0.1, zorder=3)
+        axarr[1][1].set_xlabel('relative abundance of clade collection')
+        axarr[1][1].set_ylabel('absolute sequences of clade collection')
+        axarr[1][1].hlines(y=200, xmin=axarr[1][1].get_xlim()[0], xmax=axarr[1][1].get_xlim()[1], colors='red')
+        axarr[1][1].text(x=-0.015, y=-3000, s=f'{below_200_prop:.2f}')
+
+
+        # work out the percentage of the sequences that these bleow 200 clade collections represented
+        non_screened_seqs = 0
+        for rel_abund, abs_abund in zip(x_rel_abund, y_abs_seqs):
+            if abs_abund < 200:
+                non_screened_seqs += abs_abund
+        prop_of_low_seq_cct = non_screened_seqs/sum(y_abs_seqs)
+        axarr[1][0].scatter(x=x_rel_abund, y=y_abs_seqs, marker='o', color='black', s=20, alpha=0.1, zorder=3)
+        axarr[1][0].set_xlabel('relative abundance of clade collection')
+        axarr[1][0].set_ylabel('absolute sequences of clade collection')
+        this = axarr[1][0].get_xlim()
+        axarr[1][0].hlines(y=200, xmin=axarr[1][0].get_xlim()[0], xmax=axarr[1][0].get_xlim()[1], colors='red')
+        axarr[1][0].text(x=-0.015, y=-3000, s=f'{below_200_prop:.2f}')
+        # axarr[1][1].set_ylim(-0.02, 1.02)
+
+        # now look to see if the profiles were found in the minor or maj clade collections of a given sample
+        maj_cc_list = []
+        min_cc_list = []
+        for prof_uid in self.profile_abundance_df_cutoff_background:
+            # for each sample that the profile was found in
+            ser = self.profile_abundance_df_cutoff_background[prof_uid]
+            ser = ser[ser>0]
+            for smp_uid, value in ser.items():
+                max_clade = self.clade_proportion_df_non_normalised.loc[smp_uid].idxmax()
+                clade_of_profile = self.profile_meta_info_df.at[prof_uid, 'Clade']
+                if max_clade == clade_of_profile:
+                    maj_cc_list.append(value)
+                else:
+                    min_cc_list.append(value)
+
+        print(f'{len(maj_cc_list)} of the profiles were found in maj {len(min_cc_list)} were found in minor')
+
+        multi_smp_list = []
+        single_smp_list = []
+        no_smp_list = []
+        tot = 0
+        for smp_uid in self.profile_abundance_df_cutoff_background.index:
+            clade_props_ser = self.clade_proportion_df_non_normalised.loc[smp_uid]
+            max_clade = clade_props_ser.idxmax()
+            for clade in clade_props_ser.index:
+                if clade == max_clade or clade_props_ser[clade] == 0:
+                    continue
+                # get number of profiles of this sample in the background and of the clade
+                tot += 1
+                prof_abund_ser = self.profile_abundance_df_cutoff_background.loc[smp_uid]
+                prof_abund_ser = prof_abund_ser[prof_abund_ser > 0]
+                minor_prof_of_clade_list = [value for prof_uid, value in prof_abund_ser.items() if self.profile_meta_info_df.at[prof_uid, 'Clade'] == clade]
+                if minor_prof_of_clade_list:
+                    if len(minor_prof_of_clade_list) > 1:
+                        multi_smp_list.append(smp_uid)
+                    else:
+                        single_smp_list.append(smp_uid)
+                else:
+                    no_smp_list.append(smp_uid)
+
+        print(f'{len(multi_smp_list)} clade collections had multiple, {len(single_smp_list)} clade collections had single. tot was {tot}. non list was {len(no_smp_list)}')
+
+
+        # want to show the disproportionate number of A, C, D instances in the back ground vs. the others.
+        # first get number of instances for high and low and then for background
+        high_low_dd_dict_profile_instances = defaultdict(int)
+        back_dd_dict_profile_instances = defaultdict(int)
+        for profile_uid in self.profile_abundance_df_cutoff_high:
+            ser = self.profile_abundance_df_cutoff_high[profile_uid]
+            ser = ser[ser>0]
+            clade_of_profile = self.profile_meta_info_df.at[profile_uid, 'Clade']
+            count_of_profile = len(ser.values.tolist())
+            high_low_dd_dict_profile_instances[clade_of_profile] += count_of_profile
+
+        for profile_uid in self.profile_abundance_df_cutoff_low:
+            ser = self.profile_abundance_df_cutoff_low[profile_uid]
+            ser = ser[ser>0]
+            clade_of_profile = self.profile_meta_info_df.at[profile_uid, 'Clade']
+            count_of_profile = len(ser.values.tolist())
+            high_low_dd_dict_profile_instances[clade_of_profile] += count_of_profile
+
+        for profile_uid in self.profile_abundance_df_cutoff_background:
+            ser = self.profile_abundance_df_cutoff_background[profile_uid]
+            ser = ser[ser>0]
+            clade_of_profile = self.profile_meta_info_df.at[profile_uid, 'Clade']
+            count_of_profile = len(ser.values.tolist())
+            back_dd_dict_profile_instances[clade_of_profile] += count_of_profile
+
+        print(high_low_dd_dict_profile_instances)
+        print(back_dd_dict_profile_instances)
+
+        for dd_dict, dd_dict_name in zip([high_low_dd_dict_profile_instances, back_dd_dict_profile_instances], ['high_low', 'background']):
+            for clade in list('ACD'):
+                prop = dd_dict[clade]/sum(dd_dict.values())
+                print(f'For {dd_dict_name}, clade {clade} proportion was {prop}')
+
+        # finally need to compare this to the clade ratios of the minor clade collections
+        minor_cc_dd_dict = defaultdict(int)
+        for smp_uid in self.clade_proportion_df_non_normalised.index:
+            clade_absolute_abundances = self.clade_proportion_df_non_normalised.loc[smp_uid]*self.seq_meta_data_df.at[smp_uid, 'post_med_absolute']
+            max_clade = self.clade_proportion_df_non_normalised.loc[smp_uid].idxmax()
+            for clade in clade_absolute_abundances.index:
+                if clade_absolute_abundances[clade] > 200 and clade != max_clade:
+                    minor_cc_dd_dict[clade] += 1
+        print(f'\n{minor_cc_dd_dict}')
+        print(minor_cc_dd_dict)
+
+        for clade in list('ACD'):
+            prop = minor_cc_dd_dict[clade] / sum(minor_cc_dd_dict.values())
+            print(f'For minor_dd_dict, clade {clade} proportion was {prop}')
+
+        f.savefig(os.path.join(self.figure_dir, 'background_profiles.png'), dpi=1200)
+        f.savefig(os.path.join(self.figure_dir, 'background_profiles.svg'), dpi=1200)
         foo = 'bar'
 
         # colour the points by number of codom seqs in the profile (on averge) and
 
+    def _check_if_cc_has_prof(self, clade, smp_uid, df):
+        ser_back = df.loc[smp_uid]
+        ser_back = ser_back[ser_back > 0]
+        prof_of_clade_list = [value for prof_uid, value in ser_back.items() if
+                              self.profile_meta_info_df.at[prof_uid, 'Clade'] == clade]
+        if prof_of_clade_list:
+            return True
+        else:
+            return False
 
     def report_on_reef_type_effect_metrics(self):
         """This will report on the proportion of ITS2 type profile instances that were found in both reefs belonging
