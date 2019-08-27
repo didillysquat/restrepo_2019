@@ -67,6 +67,7 @@ from sklearn import linear_model
 import re
 import seaborn as sns
 import scipy.stats
+from matplotlib_venn import venn2
 
 def braycurtis_tup(u_v_tup, w=None):
     import scipy.spatial.distance as distance
@@ -490,8 +491,22 @@ class RestrepoAnalysis:
                 back_sample_num.append(0)
                 found_high_low_not_back += 1
 
-        from matplotlib_venn import venn2
-        venn2(subsets=(found_back_not_high_low,found_high_low_not_back ,found_both), set_labels=('background','non-background'), ax=axarr[1][2])
+
+        back = 0
+        high_low = 0
+        common = 0
+        for back_abund, high_low_abund in zip(back_sample_num, high_low_sample_num):
+            if back_abund !=0 and high_low_abund != 0:
+                common += (back_abund + high_low_abund)
+            elif high_low_abund != 0:
+                high_low += high_low_abund
+            else:
+                back += back_abund
+
+        venn2(subsets=(back, high_low, common),
+              set_labels=('background', 'non-background'), ax=axarr[1][2])
+
+        # venn2(subsets=(found_back_not_high_low,found_high_low_not_back ,found_both), set_labels=('background','non-background'), ax=axarr[1][2])
 
         axarr[0][2].scatter(x=back_sample_num, y=high_low_sample_num, marker='o', color='black', s=20, alpha=0.1)
         axarr[0][2].set_xlabel('background_profile_abundances')
@@ -735,8 +750,8 @@ class RestrepoAnalysis:
             prop = minor_cc_dd_dict[clade] / sum(minor_cc_dd_dict.values())
             print(f'For minor_dd_dict, clade {clade} proportion was {prop}')
 
-        f.savefig(os.path.join(self.figure_dir, 'background_profiles.png'), dpi=1200)
-        f.savefig(os.path.join(self.figure_dir, 'background_profiles.svg'), dpi=1200)
+        f.savefig(os.path.join(self.figure_dir, 'background_profiles_instances.png'), dpi=1200)
+        f.savefig(os.path.join(self.figure_dir, 'background_profiles_instances.svg'), dpi=1200)
         foo = 'bar'
 
         # colour the points by number of codom seqs in the profile (on averge) and
@@ -862,9 +877,22 @@ class RestrepoAnalysis:
 
         self._report_on_fidelity(df_low, high_low='low')
 
-        print('\n\nRunning stats:')
+        # for the background
+        abund_df_to_work_from = self.profile_abundance_df_cutoff_background
+        df_background = self._get_df_of_average_unique_groups_per_profile_per_factor(abund_df_to_work_from)
+        print('\n\n')
+        self._report_on_fidelity(df_background, high_low='background')
+
+        # stats for high vs low
+        print('\n\nRunning stats for high vs low:')
         for factor in self.experimental_metadata_info_df.columns:
             stat, p = scipy.stats.mannwhitneyu(df_high[factor], df_low[factor])
+            print(f'{factor}: {stat}: {p}')
+
+        # stats for high vs background
+        print('\n\nRunning stats for high vs low:')
+        for factor in self.experimental_metadata_info_df.columns:
+            stat, p = scipy.stats.mannwhitneyu(df_high[factor], df_background[factor])
             print(f'{factor}: {stat}: {p}')
 
         # I think it would also be really useful to know what proportion of the overall sample abundances were accounted for by the lower upper and discounted ITS2 type profile abundances
@@ -3951,7 +3979,7 @@ if __name__ == "__main__":
     # code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
     # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
     # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='background')
-    # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
+    rest_analysis.report_on_fidelity_proxies_for_profile_associations()
     # rest_analysis.report_on_reef_type_effect_metrics()
     # rest_analysis.make_networks()
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
@@ -3965,7 +3993,7 @@ if __name__ == "__main__":
     # rest_analysis.make_sample_balance_figure()
     # rest_analysis.permute_profile_permanova()
     # rest_analysis.histogram_of_all_abundance_values()
-    rest_analysis.investigate_background()
+    # rest_analysis.investigate_background()
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
 
 
