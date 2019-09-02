@@ -2210,12 +2210,12 @@ class RestrepoAnalysis:
                 bar_ys = [_ * (1 / len(self.species_category_list)) for _ in range(len(self.species_category_list))]
                 bar_width_dict = defaultdict(int)
                 for spec_cat in self.species_category_list:
-                    rows_of_interest = self.parent.metadata_info_df.loc[
-                        (self.parent.metadata_info_df['species'] == spec_cat) &
-                        (self.parent.metadata_info_df['reef'] == reef_name) &
-                        (self.parent.metadata_info_df['season'] == season_name) &
-                        (self.parent.metadata_info_df['depth'] == depth_name) &
-                        (self.parent.metadata_info_df['reef_type'] == self.reef_types[i - 1])]
+                    rows_of_interest = self.parent.experimental_metadata_info_df.loc[
+                        (self.parent.experimental_metadata_info_df['species'] == spec_cat) &
+                        (self.parent.experimental_metadata_info_df['reef'] == reef_name) &
+                        (self.parent.experimental_metadata_info_df['season'] == season_name) &
+                        (self.parent.experimental_metadata_info_df['depth'] == depth_name) &
+                        (self.parent.experimental_metadata_info_df['reef_type'] == self.reef_types[i - 1])]
                     bar_width_dict[spec_cat] += len(rows_of_interest.index.values.tolist())
                 bar_widths = [bar_width_dict[spec_cat] for spec_cat in self.species_category_list]
                 species_c_list = [
@@ -2313,7 +2313,37 @@ class RestrepoAnalysis:
                 self.large_map_ax = plt.subplot(self.outer_gs[0:1, 0:1], projection=ccrs.PlateCarree(), zorder=1)
                 x0_extent, x1_extent, y0_extent, y1_extent = 38.7, 39.3, 22.0, 22.6
 
+                from cartopy.io.shapereader import Reader
+                from cartopy.feature import ShapelyFeature
+                reefs_shape_path_py = '/Users/humebc/Downloads/14_001_WCMC008_CoralReefs2018_v4/01_Data/WCMC008_CoralReef2018_Py_v4.shp'
+                if os.path.exists(os.path.join(self.parent.cache_dir, 'reef_reader_trimmed')):
+                    reader = pickle.load(open(os.path.join(self.parent.cache_dir, 'reef_reader_trimmed'), 'rb'))
+                elif os.path.exists(os.path.join(self.parent.cache_dir, 'reef_reader')):
+                    reader = pickle.load(open(os.path.join(self.parent.cache_dir, 'reef_reader'), 'rb'))
+                    reader = self._trim_reader(reader)
+                    pickle.dump(reader, open(os.path.join(self.parent.cache_dir, 'reef_reader_trimmed'), 'wb'))
+                else:
+                    reader = Reader(reefs_shape_path_py)
+                    pickle.dump(reader, open(os.path.join(self.parent.cache_dir, 'reef_reader'), 'wb'))
+                    reader = self._trim_reader(reader)
+                    pickle.dump(reader, open(os.path.join(self.parent.cache_dir, 'reef_reader_trimmed'), 'wb'))
+
+                geom = reader.geometries()
+                # for g in geom:
+                #     look = 'this'
+                # for g in geom:
+                #     look = 'this'
                 self.large_map_ax.set_extent(extents=(x0_extent, x1_extent, y0_extent, y1_extent))
+                shap_f = ShapelyFeature(geom, ccrs.PlateCarree(), edgecolor='black', linewidth=0.5)
+
+                # shape_feature = ShapelyFeature(Reader(reefs_shape_path_py).geometries(),
+                #                                ccrs.PlateCarree(), edgecolor='black')
+                self.large_map_ax.add_feature(shap_f, facecolor='#C1DD79', zorder=2)
+                print('saving')
+                # self.fig.savefig(os.path.join(self.parent.figure_dir, 'map_testing.png'), dpi=1200)
+                # self.fig.savefig(os.path.join(self.parent.figure_dir, 'map_testing.svg'), dpi=1200)
+                # sys.exit()
+
                 # land_10m, ocean_10m = self._get_naural_earth_features_big_map()
                 # self._draw_natural_earth_features_big_map(land_10m, ocean_10m)
                 self._add_land_and_sea_to_inset(self.large_map_ax, x0_extent, x1_extent, y0_extent, y1_extent)
@@ -2321,19 +2351,27 @@ class RestrepoAnalysis:
                 self._annotate_big_map()
                 # self._draw_reefs_on_map(self.large_map_ax)
 
+            def _trim_reader(self, reader):
+                new_data = []
+                for r in reader._data:
+                    if 'SAU' in r['ISO3']:
+                        new_data.append(r)
+                reader._data = new_data
+                return reader
+
             def _add_land_and_sea_to_inset(self, map_ax, x0_extent, x1_extent, y0_extent, y1_extent):
                 x_s, y_s = self._add_kml_file_to_ax(ax=map_ax,
                                                     kml_path=os.path.join(self.parent.gis_input_base_path, 'restrepo_coastline.kml'))
                 poly_xy = [[x, y] for x, y in zip(x_s, y_s)]
                 # add top right and bottom right
                 poly_xy.extend([[x1_extent, y1_extent], [x1_extent, y0_extent]])
-                land_poly = Polygon(poly_xy, closed=True, fill=True, color=(238 / 255, 239 / 255, 219 / 255))
+                land_poly = Polygon(poly_xy, closed=True, fill=True, color=(238 / 255, 239 / 255, 219 / 255), zorder=3)
                 map_ax.add_patch(land_poly)
                 # now do the seq poly
                 poly_xy = [[x, y] for x, y in zip(x_s, y_s)]
                 # add top left and bottom left
                 poly_xy.extend([[x0_extent, y1_extent], [x0_extent, y0_extent]])
-                sea_poly = Polygon(poly_xy, closed=True, fill=True, color=(136 / 255, 182 / 255, 224 / 255))
+                sea_poly = Polygon(poly_xy, closed=True, fill=True, color=(136 / 255, 182 / 255, 224 / 255), zorder=1)
                 map_ax.add_patch(sea_poly)
 
             def _add_kml_file_to_ax(self, ax, kml_path, linewidth=0.8, linestyle='-', color='black', ):
@@ -2349,7 +2387,7 @@ class RestrepoAnalysis:
                     x_y_tups_of_feature.append([float(_) for _ in tup.split(',')[:-1]])
                 x_s = [_[0] for _ in x_y_tups_of_feature]
                 y_s = [_[1] for _ in x_y_tups_of_feature]
-                ax.plot(x_s, y_s, linewidth=linewidth, linestyle=linestyle, color=color)
+                ax.plot(x_s, y_s, linewidth=linewidth, linestyle=linestyle, color=color, zorder=3)
                 return x_s, y_s
 
             def _draw_reefs_on_map(self, map_ax):
@@ -2419,32 +2457,32 @@ class RestrepoAnalysis:
                 self.small_map_ax = self.fig.add_axes([fig_data[0][0], fig_data[0][1], width, height], zorder=2,
                                                       projection=ccrs.PlateCarree())
 
-            def _annotate_big_map(self):
+            def _annotate_big_map(self, zorder=4):
                 x_site_coords = [38.778333, 38.854283, 38.960533, 38.992800, 39.055275, 39.030267, ]
                 y_site_coords = [22.109143, 22.322533, 22.306233, 22.430717, 22.308564, 22.232617, ]
-                self.large_map_ax.plot(x_site_coords[:2], y_site_coords[:2], 'ko')
-                self.large_map_ax.plot(x_site_coords[2:4], y_site_coords[2:4], 'ks')
-                self.large_map_ax.plot(x_site_coords[4:6], y_site_coords[4:6], 'k^')
+                self.large_map_ax.plot(x_site_coords[:2], y_site_coords[:2], 'ko', zorder=zorder)
+                self.large_map_ax.plot(x_site_coords[2:4], y_site_coords[2:4], 'ks', zorder=zorder)
+                self.large_map_ax.plot(x_site_coords[4:6], y_site_coords[4:6], 'k^', zorder=zorder)
                 # Abu Madafi
-                self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, self.site_labels[0], fontsize='medium')
+                self.large_map_ax.text(x_site_coords[0] + 0.01, y_site_coords[0] + 0.01, self.site_labels[0], fontsize='medium', zorder=zorder)
                 # Shi'b Nazar
-                self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, self.site_labels[1], fontsize='medium')
+                self.large_map_ax.text(x_site_coords[1] - 0.08, y_site_coords[1] + 0.02, self.site_labels[1], fontsize='medium', zorder=zorder)
                 # Al Fahal
-                self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, self.site_labels[2], fontsize='medium')
+                self.large_map_ax.text(x_site_coords[2] - 0.06, y_site_coords[2] - 0.04, self.site_labels[2], fontsize='medium', zorder=zorder)
                 # Qita al-Kirsh
-                self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, self.site_labels[3], fontsize='medium')
+                self.large_map_ax.text(x_site_coords[3] - 0.1, y_site_coords[3] + 0.02, self.site_labels[3], fontsize='medium', zorder=zorder)
                 # Tahla
-                self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, self.site_labels[4], fontsize='medium')
+                self.large_map_ax.text(x_site_coords[4] - 0.04, y_site_coords[4] + 0.02, self.site_labels[4], fontsize='medium', zorder=zorder)
                 # Fsar
-                self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, self.site_labels[5], fontsize='medium')
-                self.large_map_ax.plot(39.14, 22.57, 'k^', zorder=3)
+                self.large_map_ax.text(x_site_coords[5] - 0.06, y_site_coords[5] - 0.03, self.site_labels[5], fontsize='medium', zorder=zorder)
+                self.large_map_ax.plot(39.14, 22.57, 'k^', zorder=zorder)
                 self.large_map_ax.text(39.16, 22.57, 'Inshore', verticalalignment='center')
-                self.large_map_ax.plot(39.14, 22.51, 'ks', zorder=3)
+                self.large_map_ax.plot(39.14, 22.51, 'ks', zorder=zorder)
                 self.large_map_ax.text(39.16, 22.51, 'Midshore', verticalalignment='center')
-                self.large_map_ax.plot(39.14, 22.45, 'ko', zorder=3)
+                self.large_map_ax.plot(39.14, 22.45, 'ko', zorder=zorder)
                 self.large_map_ax.text(39.16, 22.45, 'Offshore', verticalalignment='center')
                 r1 = patches.Rectangle(
-                    xy=(39.10, 22.4), width=0.2, height=0.2, fill=True, facecolor='white', edgecolor='black', linewidth=1, zorder=2, alpha=0.4)
+                    xy=(39.10, 22.4), width=0.2, height=0.2, fill=True, facecolor='white', edgecolor='black', linewidth=1, zorder=3, alpha=0.4)
                 self.large_map_ax.add_patch(r1)
                 apples = 'asdf'
 
@@ -3979,7 +4017,7 @@ if __name__ == "__main__":
     # code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
     # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
     # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='background')
-    rest_analysis.report_on_fidelity_proxies_for_profile_associations()
+    # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
     # rest_analysis.report_on_reef_type_effect_metrics()
     # rest_analysis.make_networks()
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
@@ -3987,7 +4025,7 @@ if __name__ == "__main__":
     # rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
-    # rest_analysis.make_sample_balance_figure()
+    rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
     # rest_analysis.permute_sample_permanova()
     # rest_analysis.make_sample_balance_figure()
