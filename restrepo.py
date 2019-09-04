@@ -315,8 +315,73 @@ class RestrepoAnalysis:
         self.reef_types = ['Inshore', 'Midshelf', 'Offshore']
         self.depths = [1, 15, 30]
         self.seasons = ['Winter', 'Summer']
+        sites = ['Abu Madafi', "Shib Nazar", 'Al Fahal', 'Qita al Kirsh', 'Tahla', 'Fsar']
+        x_site_coords = [38.778333, 38.854283, 38.960533, 38.992800, 39.055275, 39.030267, ]
+        y_site_coords = [22.109143, 22.322533, 22.306233, 22.430717, 22.308564, 22.232617, ]
+        self.site_lat_long_tups = {site: (lat, long) for site, lat, long in zip(sites, y_site_coords, x_site_coords)}
+
 
         self._del_propblem_sample()
+
+    def populate_data_sheet(self):
+        path_to_data_sheet_csv = os.path.join(self.base_input_dir, 'restrepo_data_sheet_20190904.csv')
+        df = pd.read_csv(path_to_data_sheet_csv, skiprows=1)
+        df = df.iloc[:,:14]
+
+        list_of_files_path = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/input/list_of_files.txt'
+        with open(list_of_files_path, 'r') as f:
+            list_of_file_names = [line.rstrip() for line in f]
+        list_of_file_name_components = [filename.split('_') for filename in list_of_file_names]
+        # populate the fwd and rev files
+        # date is 12
+        # long is 11
+        # lat is 10
+        # fwd is 1
+        # rev is 2
+        df['fastq_fwd_file_name'] = df['fastq_fwd_file_name'].astype(str)
+        df['fastq_rev_file_name'] = df['fastq_rev_file_name'].astype(str)
+        df['collection_date'] = df['collection_date'].astype(str)
+        for i, row in df.iterrows():
+            count = 0
+            sample_name = row['sample_name']
+            for file_name_list in list_of_file_name_components:
+                if sample_name in file_name_list:
+                    if 'R1' in file_name_list:
+                        df.iat[i, 1] = '_'.join(file_name_list)
+                        count += 1
+                    elif 'R2' in file_name_list:
+                        df.iat[i, 2] = '_'.join(file_name_list)
+                        count += 1
+            if count != 2:
+                print('whoops')
+            for k, v in self.smp_name_to_uid_dict.items():
+                if sample_name in k:
+                    sample_uid = v
+                    break
+            if sample_name == 'FS15SE8':
+                site = 'Fsar'
+            else:
+                site = self.experimental_metadata_info_df.at[sample_uid, 'reef']
+
+            lat, long = self.site_lat_long_tups[site]
+            df.iat[i, 10] = lat
+            df.iat[i, 11] = long
+
+            if sample_name == 'FS15SE8':
+                df.iat[i, 12] = "17.07.25"
+            else:
+                if self.experimental_metadata_info_df.at[sample_uid, 'season'] == 'Winter':
+                    df.iat[i,12] = "17.03.01"
+                else:
+                    df.iat[i,12] = "17.07.25"
+        df.to_csv(path_or_buf=os.path.join(self.base_input_dir, 'restrepo_data_sheet_20190904_pop.csv'), index=False)
+        foo = 'bar'
+
+
+
+
+
+        foo = 'bar'
 
     def make_networks(self):
         # The collections of ITS2 type profiles that we will make networks for.
@@ -4005,6 +4070,7 @@ class MetaInfoPlotter:
 
 if __name__ == "__main__":
     rest_analysis = RestrepoAnalysis(cutoff_abund=0.05, remove_se=False, maj_only=False, remove_se_clade_props=True, seq_distance_method='unifrac')
+    rest_analysis.populate_data_sheet()
     # When we ran the analysis of variance ratios within the context of the between sample distance permanova analysis
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
@@ -4025,7 +4091,7 @@ if __name__ == "__main__":
     # rest_analysis.plot_pcoa_of_cladal()
     # rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
-    rest_analysis.make_sample_balance_figure()
+    # rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
     # rest_analysis.permute_sample_permanova()
     # rest_analysis.make_sample_balance_figure()
