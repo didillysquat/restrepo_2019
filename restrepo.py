@@ -68,6 +68,7 @@ import re
 import seaborn as sns
 import scipy.stats
 from matplotlib_venn import venn2
+from netCDF4 import Dataset
 
 def braycurtis_tup(u_v_tup, w=None):
     import scipy.spatial.distance as distance
@@ -270,6 +271,7 @@ class RestrepoAnalysis:
         self.daily_temperature_av_df = None
         self.daily_temperature_range_df = None
         self._make_temp_df()
+        self.remotely_sensed_sst_df = self._make_remotely_sensed_sst_df()
 
         # ITS2 sequence abundance (post-MED) dataframe
         self.post_med_seq_abundance_relative_df = self._post_med_seq_abundance_relative_df()
@@ -375,13 +377,84 @@ class RestrepoAnalysis:
                 else:
                     df.iat[i,12] = "17.07.25"
         df.to_csv(path_or_buf=os.path.join(self.base_input_dir, 'restrepo_data_sheet_20190904_pop.csv'), index=False)
-        foo = 'bar'
 
 
+    def _make_remotely_sensed_sst_df(self):
+        """This code is concerend with creating a df that contains the sst data for each of the sites as
+        derived from the remotely sensed coral reef watch 5km data:
+        ftp://ftp.star.nesdis.noaa.gov/pub/sod/mecb/crw/data/coraltemp/v1.0/nc/2017/
+        """
 
+        if os.path.exists(os.path.join(self.cache_dir, 'r_sst_df')):
+            r_sst_df = pickle.load(open(os.path.join(self.cache_dir, 'r_sst_df'), 'rb'))
+            for index, row in r_sst_df.iterrows():
+                if row.isnull().values.any():
+                    self._complete_r_sst_df(r_sst_df)
+            return r_sst_df
+        else:
+            # dataframe to hold all of the remotely sensed sst data
+            r_sst_df = pd.DataFrame(index=self.daily_temperature_av_df.index,
+                                    columns=["Shib Nazar", 'Al Fahal', 'Qita al Kirsh', 'Tahla'])
 
+            self._complete_r_sst_df(r_sst_df)
+            return r_sst_df
 
-        foo = 'bar'
+    def _complete_r_sst_df(self, r_sst_df):
+        data_lats, data_lons, site_to_lat_lon_data_tup_dict = self._make_closest_lat_lon_dict()
+        self._populate_r_sst_df(data_lats, data_lons, r_sst_df, site_to_lat_lon_data_tup_dict)
+
+    def _populate_r_sst_df(self, data_lats, data_lons, r_sst_df, site_to_lat_lon_data_tup_dict):
+        # now go day by day to populate the r_sst_df
+        for day_index in self.daily_temperature_av_df.index.values.tolist():
+            print(f"Populating r_sst_df for {day_index}")
+            # first check to see if this day is already populated
+            if not r_sst_df.loc[day_index].isnull().values.any():
+                continue
+            # make the month and day in same format as in the nc files
+            month, day, year = day_index.split('/')
+            month = '0' + month
+            if len(day) == 1:
+                day = "0" + day
+
+            nc_date = f'20{year}{month}{day}'
+            file_name = f'coraltemp_v1.0_{nc_date}.nc'
+            file_path = os.path.join(self.gis_input_base_path, 'crw', file_name)
+            dataset = Dataset(file_path)
+
+            dataset_df = pd.DataFrame(dataset.variables['analysed_sst'][0], index=data_lats, columns=data_lons)
+            # for every site
+            for site, tup in self.site_lat_long_tups.items():
+                if site not in ["Shib Nazar", 'Al Fahal', 'Qita al Kirsh', 'Tahla']:
+                    continue
+
+                closest_var_lat, closest_var_lon = site_to_lat_lon_data_tup_dict[site]
+                # now get the temperature array
+                # for each day that we have temp datavailable
+                sst = dataset_df.at[closest_var_lat, closest_var_lon]
+                r_sst_df.at[day_index, site] = sst
+
+            # pickle after everyday as this could represent quite a lot of work.
+            pickle.dump(r_sst_df, open(os.path.join(self.cache_dir, 'r_sst_df'), 'wb'))
+
+    def _make_closest_lat_lon_dict(self):
+        # first make a dictionary that is the site to the closest lat and long value
+        # we can just use one of the .nc files at random to get this info
+        dataset = Dataset(os.path.join(self.gis_input_base_path, 'crw', "coraltemp_v1.0_20170101.nc"))
+        # the lat and lon keys of the dataset
+        data_lats = [float(_) for _ in list(dataset.variables['lat'])]
+        data_lons = [float(_) for _ in list(dataset.variables['lon'])]
+        site_to_lat_lon_data_tup_dict = {}
+        for site, tup in self.site_lat_long_tups.items():
+            if site not in ["Shib Nazar", 'Al Fahal', 'Qita al Kirsh', 'Tahla']:
+                continue
+            lat_of_site = tup[0]
+            lon_of_site = tup[1]
+
+            closest_var_lat = min(data_lats, key=lambda x: abs(x - lat_of_site))
+            closest_var_lon = min(data_lons, key=lambda x: abs(x - lon_of_site))
+
+            site_to_lat_lon_data_tup_dict[site] = (closest_var_lat, closest_var_lon)
+        return data_lats, data_lons, site_to_lat_lon_data_tup_dict
 
     def make_networks(self):
         # The collections of ITS2 type profiles that we will make networks for.
@@ -4070,7 +4143,7 @@ class MetaInfoPlotter:
 
 if __name__ == "__main__":
     rest_analysis = RestrepoAnalysis(cutoff_abund=0.05, remove_se=False, maj_only=False, remove_se_clade_props=True, seq_distance_method='unifrac')
-    rest_analysis.populate_data_sheet()
+    # rest_analysis.populate_data_sheet()
     # When we ran the analysis of variance ratios within the context of the between sample distance permanova analysis
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
@@ -4099,6 +4172,7 @@ if __name__ == "__main__":
     # rest_analysis.histogram_of_all_abundance_values()
     # rest_analysis.investigate_background()
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
+    rest_analysis.nc()
 
 
 
