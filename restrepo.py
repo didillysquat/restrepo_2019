@@ -1318,7 +1318,10 @@ class RestrepoAnalysis:
         offshore_abud_madafi = plt.subplot(gs[14:20, 14:18])
 
         # boxplot
-        box_plot_ax = plt.subplot(gs[4:16, 19:])
+        box_plot_ax = plt.subplot(gs[:10, 19:])
+
+        # remotely sensed vs 5m plot
+        r_sst_ax = plt.subplot(gs[10:, 19:])
 
         indi_axarr = []
         indi_axarr.extend([inshore_fsar, inshore_tahala, midshore_al_fahal, midshore_quita_al_kirsh, offshore_shib_nazar, offshore_abud_madafi])
@@ -1367,10 +1370,27 @@ class RestrepoAnalysis:
         # now do the box plot
         self._plot_temp_box_plots(box_plot_ax)
 
+        # now do the remotely sensed plotting
+        self._plot_remotely_sensed_data_5_m(r_sst_ax)
+
         # plt.tight_layout()
         apples = 'asdf'
         plt.savefig(os.path.join(self.figure_dir, 'temp_plot.png'), dpi=1200)
         plt.savefig(os.path.join(self.figure_dir, 'temp_plot.svg'), dpi=1200)
+
+    def _plot_remotely_sensed_data_5_m(self, ax):
+        # first plot the remotely sensed data to see what we're looking at
+        # The x will be the same (hopefully) for both the insitu data and the remotely sensed data
+        x = self.remotely_sensed_sst_df.index.values.tolist()
+        for reef in ["Shib Nazar", 'Al Fahal', 'Qita al Kirsh', 'Tahla']:
+            y = self.remotely_sensed_sst_df[reef].values.tolist()
+            ax.plot(x, y, c=self.old_color_dict[reef], lw='0.5')
+
+        # now plot up the insitu data
+        # we can first try plotting this up as the daily averages but it may need to be that
+        # draw a polygon that is made up of the max and min values for each day, as we don't
+        # really know what time the remotely sensed data refers to.
+
 
     def _plot_temp_box_plots(self, box_plot_ax):
         # first get the individual hobo lists
@@ -4162,7 +4182,7 @@ if __name__ == "__main__":
     # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
     # rest_analysis.output_seq_analysis_overview_outputs()
     # rest_analysis.plot_pcoa_of_cladal()
-    # rest_analysis._plot_temperature()
+    rest_analysis._plot_temperature()
     # rest_analysis._quaternary_plot()
     # rest_analysis.make_sample_balance_figure()
     # run this to write out the distance files for running permanova in R
@@ -4172,7 +4192,6 @@ if __name__ == "__main__":
     # rest_analysis.histogram_of_all_abundance_values()
     # rest_analysis.investigate_background()
     # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
-    rest_analysis.nc()
 
 
 
