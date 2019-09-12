@@ -269,6 +269,8 @@ class RestrepoAnalysis:
         # Temperature dataframe
         self.temperature_df = None
         self.daily_temperature_av_df = None
+        self.daily_temperature_max_df = None
+        self.daily_temperature_min_df = None
         self.daily_temperature_range_df = None
         self._make_temp_df()
         self.remotely_sensed_sst_df = self._make_remotely_sensed_sst_df()
@@ -1239,10 +1241,12 @@ class RestrepoAnalysis:
     def _make_temp_df(self):
         # We should plot the daily averages rather then every point as readability suffers. We can then do
         # a seperate subplot that has a comparison of the daily variance
-        if os.path.exists(os.path.join(self.cache_dir, 'daily_temperature_av_df.p')):
+        if os.path.exists(os.path.join(self.cache_dir, 'daily_temperature_min_df.p')):
             self.daily_temperature_av_df = pickle.load(open(os.path.join(self.cache_dir, 'daily_temperature_av_df.p'), 'rb'))
             self.daily_temperature_range_df = pickle.load(open(os.path.join(self.cache_dir, 'daily_temperature_range_df.p'), 'rb'))
             self.temperature_df = pickle.load(open(os.path.join(self.cache_dir, 'temperature_df.p'), 'rb'))
+            self.daily_temperature_max_df = pickle.load(open(os.path.join(self.cache_dir, 'daily_temperature_max_df.p'), 'rb'))
+            self.daily_temperature_min_df = pickle.load(open(os.path.join(self.cache_dir, 'daily_temperature_min_df.p'), 'rb'))
         else:
             temperature_df = pd.DataFrame()
             files = [f for f in os.listdir(self.hobo_dir) if '.csv' in f]
@@ -1257,6 +1261,8 @@ class RestrepoAnalysis:
             # now calculate the daily averages. Work from 00:00 to 23:00 for each bin
             # at the same time we can calculate the daily range for each day
             daily_average_temp_dict = {}
+            daily_max_temp_dict = {}
+            daily_min_temp_dict = {}
             daily_range_temp_dict = {}
             # a list for each of the hobo columns
             daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
@@ -1266,8 +1272,12 @@ class RestrepoAnalysis:
                     if daily_temperature_bin_lists and len(daily_temperature_bin_lists[0]) == 24: # must be a full set of data
                         # then we should bank calculate what we have in the bin_list and populate a new item in the bin_dict
                         average_values = [sum(bin_list)/len(bin_list) for bin_list in daily_temperature_bin_lists]
+                        max_values = [max(bin_list) for bin_list in daily_temperature_bin_lists]
+                        min_values = [min(bin_list) for bin_list in daily_temperature_bin_lists]
                         daily_ranges = [max(bin_list)-min(bin_list) for bin_list in daily_temperature_bin_lists]
                         daily_average_temp_dict[current_day] = average_values
+                        daily_max_temp_dict[current_day] = max_values
+                        daily_min_temp_dict[current_day] = min_values
                         daily_range_temp_dict[current_day] = daily_ranges
                         daily_temperature_bin_lists = [[] for _ in range(len(list(self.temperature_df)))]
                         self._populate_bin_list_for_single_time(daily_temperature_bin_lists, time_ind)
@@ -1282,12 +1292,25 @@ class RestrepoAnalysis:
             if len(daily_temperature_bin_lists[0]) == 24:
                 # then we have one last full set of data
                 average_values = [sum(bin_list) / len(bin_list) for bin_list in daily_temperature_bin_lists]
+                max_values = [max(bin_list) for bin_list in daily_temperature_bin_lists]
+                min_values = [min(bin_list) for bin_list in daily_temperature_bin_lists]
+                daily_ranges = [max(bin_list) - min(bin_list) for bin_list in daily_temperature_bin_lists]
+
                 daily_average_temp_dict[current_day] = average_values
+                daily_max_temp_dict[current_day] = max_values
+                daily_min_temp_dict[current_day] = min_values
                 daily_range_temp_dict[current_day] = daily_ranges
+
             self.daily_temperature_av_df = pd.DataFrame.from_dict(data=daily_average_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
+            self.daily_temperature_max_df = pd.DataFrame.from_dict(data=daily_max_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
+            self.daily_temperature_min_df = pd.DataFrame.from_dict(data=daily_min_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
             self.daily_temperature_range_df = pd.DataFrame.from_dict(data=daily_range_temp_dict, orient='index', columns=self.temperature_df.columns.values.tolist())
 
             pickle.dump(self.daily_temperature_av_df, open(os.path.join(self.cache_dir, 'daily_temperature_av_df.p'), 'wb'))
+            pickle.dump(self.daily_temperature_max_df,
+                        open(os.path.join(self.cache_dir, 'daily_temperature_max_df.p'), 'wb'))
+            pickle.dump(self.daily_temperature_min_df,
+                        open(os.path.join(self.cache_dir, 'daily_temperature_min_df.p'), 'wb'))
             pickle.dump(self.daily_temperature_range_df, open(os.path.join(self.cache_dir, 'daily_temperature_range_df.p'), 'wb'))
             pickle.dump(self.temperature_df, open(os.path.join(self.cache_dir, 'temperature_df.p'), 'wb'))
 
@@ -1296,9 +1319,9 @@ class RestrepoAnalysis:
             bin_lists[i].append(temp_val)
 
     def _plot_temperature(self):
-        fig = plt.figure(figsize=(12, 4))
+        fig = plt.figure(figsize=(12, 6))
         # we will put a gap of 1 row in for the site plots
-        gs = gridspec.GridSpec(20, 27)
+        gs = gridspec.GridSpec(30, 27)
 
         # average plots
         one_m_all_sites = plt.subplot(gs[:6, :8])
@@ -1320,8 +1343,15 @@ class RestrepoAnalysis:
         # boxplot
         box_plot_ax = plt.subplot(gs[:10, 19:])
 
-        # remotely sensed vs 5m plot
-        r_sst_ax = plt.subplot(gs[10:, 19:])
+        # remotely sensed vs 1m plot
+        r_sst_ax = plt.subplot(gs[10:20, 19:])
+
+        # site separated sensed vs 1m plot
+        r_sst_ax_arr = []
+        r_sst_ax_arr.append(plt.subplot(gs[20:, :6]))
+        r_sst_ax_arr.append(plt.subplot(gs[20:, 6:12]))
+        r_sst_ax_arr.append(plt.subplot(gs[20:, 12:18]))
+        r_sst_ax_arr.append(plt.subplot(gs[20:, 18:24]))
 
         indi_axarr = []
         indi_axarr.extend([inshore_fsar, inshore_tahala, midshore_al_fahal, midshore_quita_al_kirsh, offshore_shib_nazar, offshore_abud_madafi])
@@ -1370,27 +1400,96 @@ class RestrepoAnalysis:
         # now do the box plot
         self._plot_temp_box_plots(box_plot_ax)
 
-        # now do the remotely sensed plotting
-        self._plot_remotely_sensed_data_5_m(r_sst_ax)
+        # # now do the remotely sensed plotting
+        # self._plot_remotely_sensed_data_1m(r_sst_ax)
+
+        # plot the remotely sensed data compared to the insidu data on a site separated basis
+        self._plot_remotely_sensed_data_1m_site_separated(r_sst_ax_arr)
 
         # plt.tight_layout()
         apples = 'asdf'
-        plt.savefig(os.path.join(self.figure_dir, 'temp_plot.png'), dpi=1200)
-        plt.savefig(os.path.join(self.figure_dir, 'temp_plot.svg'), dpi=1200)
+        plt.savefig(os.path.join(self.figure_dir, 'temp_plot_with_remotely_sensed.png'), dpi=1200)
+        plt.savefig(os.path.join(self.figure_dir, 'temp_plot_with_remotely_sensed.svg'), dpi=1200)
 
-    def _plot_remotely_sensed_data_5_m(self, ax):
+    def _plot_remotely_sensed_data_1m_site_separated(self, ax_arr):
+        """This function will plot up a three lines that represent the difference between the remotely sensed
+        temperature SST and the max, min and average daily in situ temperature
+        """
+
+        x = self.remotely_sensed_sst_df.index.values.tolist()
+        for i, reef in enumerate(["Shib Nazar", 'Al Fahal', 'Qita al Kirsh', 'Tahla']):
+            key = self._get_reef_key(reef)
+            remote_y = self.remotely_sensed_sst_df[reef]
+            max_y = self.daily_temperature_max_df[key]
+            av_y = self.daily_temperature_av_df[key]
+            min_y = self.daily_temperature_min_df[key]
+
+
+            # # plot top line (diff to max)
+            # ax_arr[i].plot(x, max_y - remote_y, c='grey', lw='0.5')
+
+            # plot middle line (diff to av)
+            ax_arr[i].plot(x, av_y - remote_y, c='black', lw='0.5', zorder=2)
+            ax_arr[i].set_ylim(-1, 4)
+
+            # # plot bottom line (diff to min)
+            # ax_arr[i].plot(x, min_y - remote_y, c='grey', lw='0.5')
+
+            # The x's for the lines are currently the days but we will need the data coordinates if we are going
+            # to plot a polygon as the background.
+            x_axis = ax_arr[i].get_xaxis()
+            tick_loc_arr = x_axis.get_majorticklocs()
+            # We have to fix the x lim as it was autoadjusting when adding the gridlines
+            ax_arr[i].set_xlim(min(tick_loc_arr), max(tick_loc_arr))
+
+            poly_1 = [(x, y) for x, y in zip(tick_loc_arr, (min_y - remote_y))]
+            poly_2 = [(x, y) for x, y in zip(tick_loc_arr, (max_y - remote_y))]
+            poly_2.reverse()
+            poly = poly_1 + poly_2
+            range_poly = Polygon(poly, closed=True, fill=True, color='lightgrey', zorder=1)
+            ax_arr[i].add_patch(range_poly)
+            ax_arr[i].set_xticks([])
+            if i > 0:
+                ax_arr[i].set_yticks([])
+
+            # put on a grid that we will want to be behind the plotting
+            # zorder is broken for the grid system so we will quickly put in some grids by hand with the correct
+            # zorder honoured
+            for y in range(4):
+                ax_arr[i].hlines(y=y, xmin=ax_arr[i].get_xlim()[0], xmax=ax_arr[i].get_xlim()[1], colors='darkgrey', zorder=0, linewidth=0.5)
+                # ax_arr[i].set_xlim(min(tick_loc_arr), max(tick_loc_arr))
+            ax_arr[i].grid(zorder=0)
+        foo = 'bar'
+
+    def _get_reef_key(self, reef):
+        if reef == 'Tahla':
+            key = 't_1'
+        elif reef == 'Qita al Kirsh':
+            key = 'q_1'
+        elif reef == 'Al Fahal':
+            key = 'af_1'
+        else:  # reef == 'Shib Nazar'
+            key = 'sn_1'
+        return key
+
+    def _plot_remotely_sensed_data_1m(self, ax):
         # first plot the remotely sensed data to see what we're looking at
         # The x will be the same (hopefully) for both the insitu data and the remotely sensed data
         x = self.remotely_sensed_sst_df.index.values.tolist()
         for reef in ["Shib Nazar", 'Al Fahal', 'Qita al Kirsh', 'Tahla']:
             y = self.remotely_sensed_sst_df[reef].values.tolist()
-            ax.plot(x, y, c=self.old_color_dict[reef], lw='0.5')
+            ax.plot(x, y, c='grey', lw='0.5')
 
         # now plot up the insitu data
         # we can first try plotting this up as the daily averages but it may need to be that
         # draw a polygon that is made up of the max and min values for each day, as we don't
         # really know what time the remotely sensed data refers to.
+        for reef in ["Shib Nazar", 'Al Fahal', 'Qita al Kirsh', 'Tahla']:
+            key = self._get_reef_key(reef)
+            y = self.daily_temperature_av_df[key].values.tolist()
+            ax.plot(x, y, c=self.old_color_dict[reef], lw='0.5')
 
+        foo = 'bar'
 
     def _plot_temp_box_plots(self, box_plot_ax):
         # first get the individual hobo lists
