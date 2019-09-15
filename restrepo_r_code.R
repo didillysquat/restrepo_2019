@@ -1,16 +1,32 @@
+# This R file is conserned with the Restrepo 2019 publication
+# It was used to run the PERMANOVA analyses, run the beradisper analyses, and to test significance of pairwise tests.
 library(vegan)
-# output_path = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/'
-# setwd(output_path)
-# dis_matrix = as.dist(data.matrix(read.table(file="dists_A.csv", header=FALSE, sep=',', stringsAsFactors = FALSE)))
-# meta_info = read.table(file='meta_info_A.csv', header=TRUE, sep=',')
-# adonis(formula = dis_matrix ~ reef*reef_type*depth*season*species, data=meta_info)
+
 
 # SAMPLE PERMANOVAs and tests of heterogeneity of dispersion using PERMDISP2
 # Clade A
 output_path = '/Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/'
 setwd(output_path)
+# For each of these clades there are vavious options that can be used for the dis_matrix file argument
+# there is the unifrac version, the braycurtis version, the unifrac without s hystrix (clade D only) and the unifrac with only the majority samples
+# these have the endings:
+# dists_permanova_samples_D_braycurtis.csv
+# dists_permanova_samples_D_unifrac.csv
+# dists_permanova_samples_D_unifrac_no_se.csv
+# dists_permanova_samples_D_unifrac_only_maj.csv
+
+# then for the clade proportion matrices there is a no_se version that is without s. hystrix
+# between_sample_clade_proportion_distances.csv
+# between_sample_clade_proportion_distances_no_se.csv
 dis_matrix = as.dist(data.matrix(read.table(file="dists_permanova_samples_A_braycurtis.csv", header=FALSE, sep=',', stringsAsFactors = FALSE)))
-# meta_info = read.table(file='sample_meta_info_A.csv', header=TRUE, sep=',')
+
+# Then for the meta info files there are also different versions that correspond to the distance matrices
+# including one where I have shuffled up the samples to make sure that the results we were seeing are real.
+# sample_meta_info_D_braycurtis.csv
+# sample_meta_info_D_unifrac_no_se.csv
+# sample_meta_info_D_unifrac_only_maj.csv
+# sample_meta_info_D_shuffled.csv
+
 meta_info = read.table(file='sample_meta_info_A_braycurtis.csv', header=TRUE, sep=',')
 adonis(formula = dis_matrix ~ reef_type*reef*species*depth*season, data=meta_info)
 # adonis(formula = dis_matrix ~ reef_type_shuffled*reef_shuffled*species_shuffled*depth_shuffled*season_shuffled, data=meta_info)
