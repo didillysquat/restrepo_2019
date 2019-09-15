@@ -1,39 +1,9 @@
 """Python code associated with Restrop et al 2019
 
-I think one of the first things we'll need to do with the Restrpo data is to decomplex it slightly. There
-are a huge number of ITS2 type profiles which in many cases are differenciated by very small differences in DIV
-abundances. I have been manually looking at the data and there are definitely discrete clusterings of types
-that would do well to be considered together. We can then look within these clusters at the more detailed resolutions
-further on in the analysis. Certainly the way to approach this analysis will be to work on a clade by clade basis.
-I think I would like to start by performing a hierarchical clustering and dendogram. Once I have done the clustering
-I will look at the clusters by eye to make sure that they make sense and that there are not some artefacts causing
-issues.
-
-I will use a class appraoch to hold the entire process of doing this analysis to try to do a better organisation.
-One of the first steps will be getting the dataframe read in cleanly.
-
-As I am working through this data analysis I will keep in mind that I should be able to swap out the inital
-info output documents and still be able to run the analysis from scratch easily. This is because we are updating
-the remote symportal to new code soon.
-What is probably easiest to do is to operate on the delete version I have running on middlechild and then eventually
-I can change out the documents from the new remote symportal version.
-This way I can go ahead and implement the changes to UniFrac calculations on the local_dev branch and make use of this
-for this analysis now. THis way I don't have to wait for the change to the new SymPortal to be complete before
-proceeding with this analysis.
-
-Order of analysis
-
-3 - histogram_of_all_abundance_values
-4 - make_dendogram
-5 - create_profile_df_with_cutoff
-6 - get_list_of_clade_col_type_uids_for_unifrac
-7 - remake_dendogram
-8 - make meta data df
-
-TODO list:
-plot up the dendogram with the meta information below
-Assess correlations at differing levels of collapse
-Assess why the UniFrac distance approximation is not working so well
+This code was used to anything assocaited with data in the manuscript.
+The only exceptions are the running of the PERMANOVAs, betadipers and the anovas to test pairwise distances.
+Those were all done using the R. The script for this can be found in the same git repo as this file.
+This python script was used to output the distance matrices that were read into the R analyses.
 
 """
 import os
@@ -235,7 +205,7 @@ class RestrepoAnalysis:
         self.profile_abundance_df_cutoff = None
         self.create_profile_df_with_cutoff()
 
-        # TODO we want to move towards having two ITS2 type profile schematics with hard coded cutoffs
+        # We want to move towards having two ITS2 type profile schematics with hard coded cutoffs
         # The first will be >0.40 and the second will be >0.05 and <0.40. We will move away from having
         # specific distance outputs for these clade collection types and rather use the profile distances
         # that we have from the main output (i.e. containing all types). We will simply pull out the
@@ -253,6 +223,8 @@ class RestrepoAnalysis:
         self.prof_uid_to_local_abund_dict_cutoff_low = {}
         self.profile_distance_df_dict_cutoff_low = {}
         self._create_profile_df_with_cutoff_high_low(cutoff_low=0.05, cutoff_high=0.40)
+        # NB you will have to break here and go to the SymPortal terminal to out put the distances that will be used
+        # in the creation of the dendogram figure.
         self.get_list_of_clade_col_type_uids_for_unifrac(high_low='low')
         self._populate_clade_dist_df_dict(cct_specific='low')
         # here we should have all of the items that we'll want to be passing into the dendrogram figure
@@ -324,8 +296,71 @@ class RestrepoAnalysis:
         y_site_coords = [22.109143, 22.322533, 22.306233, 22.430717, 22.308564, 22.232617, ]
         self.site_lat_long_tups = {site: (lat, long) for site, lat, long in zip(sites, y_site_coords, x_site_coords)}
 
-
         self._del_propblem_sample()
+
+    def get_list_of_clade_col_type_uids_for_unifrac(self, high_low=None):
+        """
+        This is code for getting tuples of (DataSetSample uid, AnalysisType uid).
+        These tuples can then be used to get a list of CladeCollectionType uids from the SymPortal terminal.
+        This list of clade collection type uids can then be fed in to the new distance outputs that we are writing
+        so that we can get between type distances calculated using just the sample/analysis type associations
+        in our cutoff abundance count table.
+        Once I have written the code in the SymPortal terminal I will put it in here as a comment."""
+
+        # CODE USED IN THE SYMPORTAL SHELL TO GET THE CladeCollectionType IDS
+        # from dbApp.models import *
+        # with open('dss_at_uid_tups.tsv', 'r') as f:
+        #     tup_list = [line.rstrip() for line in f]
+        # tup_list = [(line.split('\t')[0], line.split('\t')[1]) for line in tup_list]
+        # cct_id_list = []
+        # for tup in tup_list:
+        #     at = AnalysisType.objects.get(id=tup[1])
+        #     dss = DataSetSample.objects.get(id=tup[0])
+        #     cc = CladeCollection.objects.get(data_set_sample_from=dss, clade=at.clade)
+        #     cct = CladeCollectionType.objects.get(analysis_type_of=at, clade_collection_found_in=cc)
+        #     cct_id_list.append(cct.id)
+        # with open('cct_uids_005', 'w') as f:
+        #    for uid in cct_id_list:
+        #        f.write(f'{str(uid)}\n')
+
+        # The high_low attribute can be high, low or background which corresponds to the relative abundance cutoffs
+        # used in the paper of 0.4-1, 0.05-0.4 and 0-0.05 respectively.
+
+        # from the code here we can get a list that contains tuples of DataSetSample uids to AnalysisType uid for the
+        # sample type pairings that we are interested in (i.e. the non-zeros in the cutoff df). We can then use these
+        # ids to look up the CladeCollectionTypes we are interested in, get the uids of these, and pass these
+        # into the distance functions of SymPortal that we are going to make.
+        # we should make seperate outputs for bray vs unifrac, unifrac sqrt trans formed and not.
+
+        if high_low == 'background':
+            ### Then we are getting the tups specifically for the set of profiles that are below 0.05 in abundance
+            index_column_tups = list(
+                self.profile_abundance_df_cutoff_background[self.profile_abundance_df_cutoff_background > 0].stack().index)
+
+            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_background')
+        elif high_low == 'low':
+            ### Then we are getting the tups specifically for the set of profiles that are within 0.05 and 0.40 abundance
+            index_column_tups = list(
+                self.profile_abundance_df_cutoff_low[self.profile_abundance_df_cutoff_low > 0].stack().index)
+
+            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_low')
+
+        else:
+            # Then we are doing this for the older 0.05 or 0.40 cutoffs.
+            # https://stackoverflow.com/questions/26854091/getting-index-column-pairs-for-true-elements-of-a-boolean-dataframe-in-pandas
+            index_column_tups = list(self.profile_abundance_df_cutoff[self.profile_abundance_df_cutoff > 0].stack().index)
+            if self.cutoff_abund == 0.05:
+                uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_005')
+            else: #  0.40
+                uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_040')
+
+        with open(uid_pairs_for_ccts_path, 'w') as f:
+            for tup in index_column_tups:
+                f.write(f'{tup[0]}\t{tup[1]}\n')
+        print(f'A list of tuples has been output to {uid_pairs_for_ccts_path} that represent the UID of paired '
+              f'DataSetSample and AnalysisType objects found in the filtered dataframe. '
+              f'From these you can get the CladeCollectionTypes. This can then be fed into the distance output function'
+              f'to calculate ITS2 type profile distances based only on these pairings.')
 
     def populate_data_sheet(self):
         path_to_data_sheet_csv = os.path.join(self.base_input_dir, 'restrepo_data_sheet_20190904.csv')
@@ -379,7 +414,6 @@ class RestrepoAnalysis:
                 else:
                     df.iat[i,12] = "17.07.25"
         df.to_csv(path_or_buf=os.path.join(self.base_input_dir, 'restrepo_data_sheet_20190904_pop.csv'), index=False)
-
 
     def _make_remotely_sensed_sst_df(self):
         """This code is concerend with creating a df that contains the sst data for each of the sites as
@@ -457,72 +491,6 @@ class RestrepoAnalysis:
 
             site_to_lat_lon_data_tup_dict[site] = (closest_var_lat, closest_var_lon)
         return data_lats, data_lons, site_to_lat_lon_data_tup_dict
-
-    def make_networks(self):
-        # The collections of ITS2 type profiles that we will make networks for.
-        network_dict = {
-            'M_1':[
-                'A1k/A1', 'A1k/A1-A1ea', 'A1/A1k-A1b-A1z', 'A1/A1w-A1y'
-            ],
-            'SE_1':[
-                'A1-A1x-A1r-A1u-A1g'
-            ],
-            'ST_1':[
-                'A1-A1dl-A1bh', 'A1-A1m-A1z', 'A1-A1m', 'A1-A1m-A1n'
-            ],
-            'PC_1':[
-                'A1-A1c-A1h-A1q-A1a', 'A1-A1c-A1h-A1i', 'A1-A1c-A1h-A1q', 'A1-A1c-A1k-A1h-A1q', 'A1-A1c-A1h-A1cv', 'A1-A1cc-A1c-A1h-A1q-A1i', 'A1/A1c-A1h', 'A1/A1c-A1h-A1ce'
-            ],
-            's_pist_2':[
-                'A1/A1l/A1g-A1o-A1p', 'A1g/A1l/A1-A1o-A1cr-A1dp-A1p-A1dq-A1dn'
-            ],
-            'GX_1':[
-                'C1/C39-C1b-C39a-C1af', 'C1-C1b-C39-C41-C1af-C1ae'
-            ],
-            'GX_2':[
-                'C1-C1b-C39-C41-C1ae-C41f-C41a-C1af', 'C1-C1b-C41f-C41-C41a-C39-C41e-C1ae-C1f'
-            ],
-            'P_1':[
-                'C15/C60a-C15b-C15e', 'C15', 'C15-C15by-C15ai', 'C15-C15y-C15df-C15x-C15a-C15w-C15z-C15aa-C15ab', 'C15-C15y-C15a-C15z-C15x-C15aa-C15v', 'C15-C15df-C15y-C15v-C15x-C15a-C15z-C15aa', 'C15-C15x-C15v-C15ab-C15u-C15c-C15d', 'C15-C15x-C15v-C15u-C15d-C15c-C15ab-C15dg'
-            ],
-            'P_2':[
-                'C15/C22b/C15h', 'C22b/C15-C15a-C15an-C15de', 'C22b/C15-C15r', 'C15/C15r', 'C22b/C15-C15r-C15s', 'C15/C22b'
-            ],
-            'G_1':[
-                'D4/D1/D1ab-D6', 'D1-D4-D6-D2b-D2a-D1d', 'D1/D4-D6-D6b', 'D1-D4-D6-D6b-D1d-D1i-D1j-D10', 'D1-D4-D6b-D6-D1d-D1q-D1j'
-            ]
-        }
-
-        # Firstly go through each of the networks to make sure that the type names match up. I.e. check for typos.
-        print('\n\nChecking for profile names in meta info')
-        for profile_list in network_dict.values():
-            for profile_name in profile_list:
-                match_count = self.profile_meta_info_df['ITS2 type profile'].values.tolist().count(profile_name)
-                if match_count > 1:
-                    print(f'{profile_name} name found {match_count} times')
-                elif match_count == 0:
-                    print(f'{profile_name} name not found')
-        print('Checking complete')
-
-        # we want the network to have various characteristics.
-        # The size of the nodes should represent the total abundance of that sequenece throughout all of the samples
-        # whilst the greyscale colour of the node and the outline thickness
-        # should represent the proportion of samples that the sequence was found in.
-
-        # to make this happen we will need seq abundances for both the post-med and the pre-med
-
-
-        # for each network in the network dict
-        # Get a list of the samples that the profile was found in from the high cutoff df
-        # Then have two default dicts for counting the number of samples given sequences are in
-        # and for counting the relative abundance of those sequences within the samples (as a proportion of the type)
-        # first one will be key is sequences, value is samples found in.
-        # the second will be sequnces, the second will be cumulative relative abundance from samples
-        # we should also have a master fasta that will hold the actual nucleotide sequences of the seqs in the net
-        # Then, for each of these samples populate the default dicts. And populate the master fasta too.
-        # at ths point we are ready to make a network!
-
-        # for network in
 
     def investigate_background(self):
         """ This will be code associated with having an initial investigation of the low level ITS2 type profile
@@ -1208,35 +1176,6 @@ class RestrepoAnalysis:
             df.set_index('sample_uid', drop=True, inplace=True)
             pickle.dump(df, open(os.path.join(self.cache_dir, 'seq_meta_data_df.p'), 'wb'))
             return df
-
-    def _quaternary_plot(self):
-        class QuantPlot:
-            def __init__(self, parent):
-                self.parent = parent
-                # first port of call is to see what the maximum number of types is
-                dd = defaultdict(int)
-                df = self.parent.profile_df
-                for uid_ind in df.index.values.tolist():
-                    temp_series = df.loc[uid_ind]
-                    temp_series_non_zero_series = temp_series[temp_series > 0]
-                    non_zero_indices = temp_series_non_zero_series.index.values.tolist()
-                    if len(non_zero_indices) == 4:
-                        foo = 'asdf'
-                    dd[len(non_zero_indices)] += 1
-
-                self.fig = plt.figure(figsize=(8, 8))
-                # one row for each clade, for the between sample ordinations
-                # one row for the clade proportion ordination
-                # one row for the legends
-                # one column per meta info category i.e. species, reef, reef_type, etc.
-                self.gs = gridspec.GridSpec(1, 1)
-                self.quat_ax = plt.subplot(self.gs[0:1, 0:1])
-                # we will work with a box that is 10 by 10
-                self.quat_ax.set_ylim(0,10)
-                self.quat_ax.set_xlim(0,10)
-                # now set up the gridlines which will join all integer points on both axes
-
-        qp = QuantPlot(self)
 
     def _make_temp_df(self):
         # We should plot the daily averages rather then every point as readability suffers. We can then do
@@ -3486,70 +3425,8 @@ class RestrepoAnalysis:
         return profile_abundance_df_cutoff.loc[:,
                                       (profile_abundance_df_cutoff != 0).any(axis=0)]
 
-    def get_list_of_clade_col_type_uids_for_unifrac(self, high_low=None):
-        """ This is code for getting tuples of (DataSetSample uid, AnalysisType uid).
-        These tuples can then be used to get a list of CladeCollectionType uids from the SymPortal terminal.
-        This list of clade collection type uids can then be fed in to the new distance outputs that we are writing
-        so that we can get between type distances calculated using just the sample/analysis type associations
-        in our cutoff abundance count table.
-        Once I have written the code in the SymPortal terminal I will put it in here as a comment."""
 
-        # CODE USED IN THE SYMPORTAL SHELL TO GET THE CladeCollectionType IDS
-        # from dbApp.models import *
-        # with open('dss_at_uid_tups.tsv', 'r') as f:
-        #     tup_list = [line.rstrip() for line in f]
-        # tup_list = [(line.split('\t')[0], line.split('\t')[1]) for line in tup_list]
-        # cct_id_list = []
-        # for tup in tup_list:
-        #     at = AnalysisType.objects.get(id=tup[1])
-        #     dss = DataSetSample.objects.get(id=tup[0])
-        #     cc = CladeCollection.objects.get(data_set_sample_from=dss, clade=at.clade)
-        #     cct = CladeCollectionType.objects.get(analysis_type_of=at, clade_collection_found_in=cc)
-        #     cct_id_list.append(cct.id)
-        # with open('cct_uids_005', 'w') as f:
-        #    for uid in cct_id_list:
-        #        f.write(f'{str(uid)}\n')
 
-        # from the code here we can get a list that contains tuples of DataSetSample uids to AnalysisType uid for the
-        # sample type pairings that we are interested in (i.e. the non-zeros in the cutoff df). We can then use these
-        # ids to look up the CladeCollectionTypes we are interested in, get the uids of these, and pass these
-        # into the distance functions of SymPortal that we are going to make.
-        # we should make seperate outputs for bray vs unifrac, unifrac sqrt trans formed and not.
-
-        if high_low == 'background':
-            ### Then we are getting the tups specifically for the set of profiles that are below 0.05 in abundance
-            index_column_tups = list(
-                self.profile_abundance_df_cutoff_background[self.profile_abundance_df_cutoff_background > 0].stack().index)
-
-            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_background')
-        elif high_low == 'low':
-            ### Then we are getting the tups specifically for the set of profiles that are within 0.05 and 0.40 abundance
-            index_column_tups = list(
-                self.profile_abundance_df_cutoff_low[self.profile_abundance_df_cutoff_low > 0].stack().index)
-
-            uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_low')
-
-        else:
-            # Then we are doing this for the older 0.05 or 0.40 cutoffs.
-            # https://stackoverflow.com/questions/26854091/getting-index-column-pairs-for-true-elements-of-a-boolean-dataframe-in-pandas
-            index_column_tups = list(self.profile_abundance_df_cutoff[self.profile_abundance_df_cutoff > 0].stack().index)
-            if self.cutoff_abund == 0.05:
-                uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_005')
-            else: #  0.40
-                uid_pairs_for_ccts_path = os.path.join(self.outputs_dir, f'dss_at_tups_040')
-
-        with open(uid_pairs_for_ccts_path, 'w') as f:
-            for tup in index_column_tups:
-                f.write(f'{tup[0]}\t{tup[1]}\n')
-        print(f'A list of tuples has been output to {uid_pairs_for_ccts_path} that represent the UID of paired '
-              f'DataSetSample and AnalysisType objects found in the filtered dataframe. '
-              f'From these you can get the CladeCollectionTypes. This can then be fed into the distance output function'
-              f'to calculate ITS2 type profile distances based only on these pairings.')
-
-        # the list of output CladeCollectionType uids is at:
-        # /Users/humebc/Google_Drive/projects/alejandro_et_al_2018/restrepo_git_repo/outputs/cc_id_list
-
-        apples = 'asdf'
 
     def permute_profile_permanova(self):
         """ Compute a PERMANOVA based on the between type distance matrixces.  This is not totally straight forward.
@@ -3893,7 +3770,7 @@ class RestrepoAnalysis:
         """This method will be used to investigate the pairwise comparisons that have shown significant
         PERMDISP test results. It will look at how balanced the factors are and what the dispersion looks like"""
 
-        # self._assess_balance_and_variance_clade_prop()
+        self._assess_balance_and_variance_clade_prop()
 
         # we will strip the between sample matrices of non-maj samples if self.maj_only is true before assessing
         # variances as below
@@ -3910,8 +3787,6 @@ class RestrepoAnalysis:
                 for dd_k, dd_v in factor_counter_dd.items():
                     output_str += f'{dd_k}: {dd_v/max_val}; '
                 print(f'{factor} balance ratios are: {output_str}')
-        foo = 'asdf'
-
 
         # now we look at the variance ratios between the pairwise group comparisons
         # for every clade and factor combo
@@ -3930,8 +3805,7 @@ class RestrepoAnalysis:
                 self._report_bad_values_and_create_pw_df(clade, factor, factor_counter_dd, pw_var_ratio_dict,
                                                          variance_per_group_of_factor_dict)
 
-                foo = 'bar'
-            foo = 'bar'
+
 
     def _assess_balance_and_variance_clade_prop(self):
         # now assess the balance of the clade proportions
@@ -4267,30 +4141,42 @@ if __name__ == "__main__":
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
 
-    # run this to generate the dss and at id tuples that we can use in the SymPortal shell to get the specific
-    # clade collection types that we can then generate distances from to make the dendrogram figure
-    # NB I have saved the cct uid commar sep string used to output the distances in the outputs folder as
-    # cct_uid_string_005 and cct_uid_string_006
-    # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
-    # code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
+
+    # Code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
     # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
-    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='background')
-    # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
-    # rest_analysis.report_on_reef_type_effect_metrics()
-    # rest_analysis.make_networks()
-    # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
-    # rest_analysis.output_seq_analysis_overview_outputs()
-    # rest_analysis.plot_pcoa_of_cladal()
+    rest_analysis.make_dendrogram_with_meta_all_clades(high_low='background')
+
+    # Stats reporting
+    rest_analysis.report_on_fidelity_proxies_for_profile_associations()
+    rest_analysis.report_on_reef_type_effect_metrics()
+
+    # Examine the extent of study balance and heterogeneity in within factor between group dispersion
+    rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
+
+    # stats reporting
+    rest_analysis.output_seq_analysis_overview_outputs()
+
+    # plot the PCoA figures that given in the supplementary material of the ms
+    rest_analysis.plot_pcoa_of_cladal()
+
+    # create the temperature plot that is Figure 3 in the ms.
+    # this only produces the raw plots. Illustrator was used to get to the final results.
     rest_analysis._plot_temperature()
-    # rest_analysis._quaternary_plot()
-    # rest_analysis.make_sample_balance_figure()
+
+    # make the basis for what is Figure 2 in the ms.
+    rest_analysis.make_sample_balance_figure()
+
     # run this to write out the distance files for running permanova in R
-    # rest_analysis.permute_sample_permanova()
-    # rest_analysis.make_sample_balance_figure()
-    # rest_analysis.permute_profile_permanova()
-    # rest_analysis.histogram_of_all_abundance_values()
-    # rest_analysis.investigate_background()
-    # rest_analysis.get_list_of_clade_col_type_uids_for_unifrac()
+    rest_analysis.permute_sample_permanova()
+
+    # run this to make the histograms of distribution of the abundances of profiles in samples
+    rest_analysis.histogram_of_all_abundance_values()
+
+    # Run this to make the supplementary fig for the background profiles and to produce some stats for them
+    rest_analysis.investigate_background()
+
+    # plot the ternary figure that is fig 5 in the ms
+    rest_analysis.plot_ternary_clade_proportions()
 
 
 
