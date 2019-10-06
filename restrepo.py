@@ -282,7 +282,28 @@ class RestrepoAnalysis:
             'Inshore': '#FF0000', 'Midshelf': '#FFFF00', 'Offshore': '#008000',
             'Al Fahal': '#A7414A', 'Abu Madafi': '#563838',
             'Qita al Kirsh': '#6A8A82', 'Shib Nazar': '#A37C27',
-            'Tahla': '#1ECFD6', 'Fsar': '#6465A5'}
+            'Tahla': '#1ECFD6', 'Fsar': '#6465A5'
+        }
+        self.shape_str_dict = {
+            'G': 'P', 'GX': 'F', 'M': 'M', 'P': 'P',
+            'PC': 'V', 'SE': 'H', 'ST': 'S',
+            1: 'S', 15: 'M', 30: 'D',
+            'Summer': 'S', 'Winter': 'W',
+            'Inshore': 'I', 'Midshelf': 'M', 'Offshore': 'O',
+            'Al Fahal': 'A', 'Abu Madafi': 'M',
+            'Qita al Kirsh': 'Q', 'Shib Nazar': 'S',
+            'Tahla': 'T', 'Fsar': 'F'
+        }
+        self.shape_dict = {
+            'G': 'o', 'GX': 'P', 'M': '^', 'P': 's',
+            'PC': 'X', 'SE': 'v', 'ST': '*',
+            1: 'o', 15: 'P', 30: '^',
+            'Summer': 'o', 'Winter': 'P',
+            'Inshore': 'o', 'Midshelf': 'P', 'Offshore': '^',
+            'Al Fahal': 'o', 'Abu Madafi': 'P',
+            'Qita al Kirsh': '^', 'Shib Nazar': 's',
+            'Tahla': 'X', 'Fsar': 'v'
+        }
         self.reefs = ['Fsar', 'Tahla', 'Qita al Kirsh', 'Al Fahal', 'Shib Nazar', 'Abu Madafi']
 
         self.species_category_list = ['SE','PC', 'M', 'G', 'P','GX', 'ST']
@@ -2110,7 +2131,7 @@ class RestrepoAnalysis:
                         temp_ax = plt.subplot(self.gs[j:j + 1, i:i + 1])
                         temp_ax.set_xticks([])
                         temp_ax.set_yticks([])
-                        temp_ax.set_facecolor('gray')
+                        temp_ax.set_facecolor('white')
                         if j == 0:  # if this is subplot in top row
                             if i == 3:
                                 temp_ax.set_title('Genera proportions', fontweight='bold', fontsize='x-small', )
@@ -2189,8 +2210,8 @@ class RestrepoAnalysis:
 
                 self._plot_clade_proportion_ordinations()
 
-                plt.savefig(os.path.join(self.parent.figure_dir, 'ordination_figure.png'), dpi=1200)
-                plt.savefig(os.path.join(self.parent.figure_dir, 'ordination_figure.svg'), dpi=1200)
+                plt.savefig(os.path.join(self.parent.figure_dir, 'ordination_figure_str_m.png'), dpi=1200)
+                plt.savefig(os.path.join(self.parent.figure_dir, 'ordination_figure_str_m.svg'), dpi=1200)
 
             def _plot_clade_proportion_ordinations(self):
                 # now plot up the clade_proportion ordination
@@ -2199,15 +2220,28 @@ class RestrepoAnalysis:
                     pc_one_var = self.parent.clade_prop_pcoa_coords['PC1'].iat[-1] / prop_explained_tot
                     pc_two_var = self.parent.clade_prop_pcoa_coords['PC2'].iat[-1] / prop_explained_tot
                     color_list = []
-
+                    shape_list = []
                     uid_list = self.parent.clade_prop_pcoa_coords.index.values.tolist()[:-1]
+
                     for smp_uid in uid_list:
                         meta_value = self.parent.experimental_metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]
                         color_list.append(self.parent.old_color_dict[meta_value])
 
-                    self.ax_arr[i][3].scatter(x=self.parent.clade_prop_pcoa_coords['PC1'][:-1],
-                                              y=self.parent.clade_prop_pcoa_coords['PC2'][:-1], marker='.',
-                                              c=color_list, s=40, alpha=0.7, edgecolors='none')
+                    for smp_uid in uid_list:
+                        shape_list.append(self.parent.shape_dict[self.parent.experimental_metadata_info_df.loc[
+                            smp_uid, self.meta_info_categories[i]]])
+
+                    # shape_str_list = []
+                    # for s_str in shape_list:
+                    #     shape_str_list.append(f'${s_str}$')
+
+                    for x, y, m, c in zip(self.parent.clade_prop_pcoa_coords['PC1'][:-1], self.parent.clade_prop_pcoa_coords['PC2'][:-1],
+                                          shape_list, color_list):
+                        self.ax_arr[i][3].scatter(x=x, y=y, marker=m, c=c, s=10, alpha=0.7, edgecolors='none')
+
+                    # self.ax_arr[i][3].scatter(x=self.parent.clade_prop_pcoa_coords['PC1'][:-1],
+                    #                           y=self.parent.clade_prop_pcoa_coords['PC2'][:-1], marker='.',
+                    #                           c=color_list, s=40, alpha=0.7, edgecolors='none')
                     self._write_var_explained(i, self.ax_arr[i][3], pc_one_var, pc_two_var)
 
             def _plot_per_clade_ordinations(self):
@@ -2223,6 +2257,8 @@ class RestrepoAnalysis:
                     for i in range(len(self.meta_info_categories)):
 
                         color_list = []
+                        # We will also implement a shapes list to help differentiate between the colors
+                        shape_list = []
                         # if i in [0,1]:
                         #     for smp_uid in list(sample_clade_dist_df):
                         #         r,g,b = self.new_color_dict[self.parent.metadata_info_df.loc[smp_uid, self.meta_info_categories[i]]]
@@ -2232,8 +2268,20 @@ class RestrepoAnalysis:
                             color_list.append(self.parent.old_color_dict[self.parent.experimental_metadata_info_df.loc[
                                 smp_uid, self.meta_info_categories[i]]])
 
-                        self.ax_arr[i][j].scatter(x=pcoa_output.samples['PC1']*100, y=pcoa_output.samples['PC2']*100,
-                                                  marker='.', c=color_list, s=40, alpha=0.7, edgecolors='none')
+                        for smp_uid in list(sample_clade_dist_df):
+                            shape_list.append(self.parent.shape_dict[self.parent.experimental_metadata_info_df.loc[
+                                smp_uid, self.meta_info_categories[i]]])
+                        # shape_str_list = []
+                        # for s_str in shape_list:
+                        #     shape_str_list.append(f'${s_str}$')
+
+
+                        # self.ax_arr[i][j].scatter(x=pcoa_output.samples['PC1'] * 100,
+                        #                           y=pcoa_output.samples['PC2'] * 100,
+                        #                           marker="$f$", c=color_list, s=40, alpha=0.7, edgecolors='none')
+
+                        for x, y, m, c in zip(pcoa_output.samples['PC1']*100, pcoa_output.samples['PC2']*100, shape_list, color_list):
+                            self.ax_arr[i][j].scatter(x=x, y=y, marker=m, c=c, s=10, alpha=0.7, edgecolors='none')
                         self._write_var_explained(i, self.ax_arr[i][j], pc_one_var, pc_two_var)
 
             def _write_var_explained(self, i, ax, pc_one_var, pc_two_var):
@@ -4142,41 +4190,41 @@ if __name__ == "__main__":
     # We are therefore going to allow an option to remove the samples that are this species from the clade C matrix
 
 
-    # Code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
-    # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
-    rest_analysis.make_dendrogram_with_meta_all_clades(high_low='background')
-
-    # Stats reporting
-    rest_analysis.report_on_fidelity_proxies_for_profile_associations()
-    rest_analysis.report_on_reef_type_effect_metrics()
-
-    # Examine the extent of study balance and heterogeneity in within factor between group dispersion
-    rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
-
-    # stats reporting
-    rest_analysis.output_seq_analysis_overview_outputs()
-
+    # # Code to make the dendrogram figure. The high_low option will take either 'high' or 'low'.
+    # # If high is provided the 0.40 cutoff will be used. If low is passed the 0.05-0.40 cutoff range will be used
+    # rest_analysis.make_dendrogram_with_meta_all_clades(high_low='background')
+    #
+    # # Stats reporting
+    # rest_analysis.report_on_fidelity_proxies_for_profile_associations()
+    # rest_analysis.report_on_reef_type_effect_metrics()
+    #
+    # # Examine the extent of study balance and heterogeneity in within factor between group dispersion
+    # rest_analysis.assess_balance_and_dispersions_of_distance_matrix()
+    #
+    # # stats reporting
+    # rest_analysis.output_seq_analysis_overview_outputs()
+    #
     # plot the PCoA figures that given in the supplementary material of the ms
     rest_analysis.plot_pcoa_of_cladal()
-
-    # create the temperature plot that is Figure 3 in the ms.
-    # this only produces the raw plots. Illustrator was used to get to the final results.
-    rest_analysis._plot_temperature()
-
-    # make the basis for what is Figure 2 in the ms.
-    rest_analysis.make_sample_balance_figure()
-
-    # run this to write out the distance files for running permanova in R
-    rest_analysis.permute_sample_permanova()
-
-    # run this to make the histograms of distribution of the abundances of profiles in samples
-    rest_analysis.histogram_of_all_abundance_values()
-
-    # Run this to make the supplementary fig for the background profiles and to produce some stats for them
-    rest_analysis.investigate_background()
-
-    # plot the ternary figure that is fig 5 in the ms
-    rest_analysis.plot_ternary_clade_proportions()
+    #
+    # # create the temperature plot that is Figure 3 in the ms.
+    # # this only produces the raw plots. Illustrator was used to get to the final results.
+    # rest_analysis._plot_temperature()
+    #
+    # # make the basis for what is Figure 2 in the ms.
+    # rest_analysis.make_sample_balance_figure()
+    #
+    # # run this to write out the distance files for running permanova in R
+    # rest_analysis.permute_sample_permanova()
+    #
+    # # run this to make the histograms of distribution of the abundances of profiles in samples
+    # rest_analysis.histogram_of_all_abundance_values()
+    #
+    # # Run this to make the supplementary fig for the background profiles and to produce some stats for them
+    # rest_analysis.investigate_background()
+    #
+    # # plot the ternary figure that is fig 5 in the ms
+    # rest_analysis.plot_ternary_clade_proportions()
 
 
 
