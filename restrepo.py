@@ -39,6 +39,10 @@ import seaborn as sns
 import scipy.stats
 from matplotlib_venn import venn2
 from netCDF4 import Dataset
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
+from matplotlib.colors import ListedColormap
+import random
 
 def braycurtis_tup(u_v_tup, w=None):
     import scipy.spatial.distance as distance
@@ -94,7 +98,7 @@ class RestrepoAnalysis:
     """The class responsible for doing all python based analyses for the restrepo et al. 2019 paper.
     NB although we see clade F in the dataset this is minimal and so we will
     tackle this sepeately to the analysis of the A, C and D."""
-    def __init__(self, cutoff_abund, seq_distance_method, profile_distance_method='unifrac', ignore_cache=False, remove_se=False, maj_only=False, remove_se_clade_props=False):
+    def __init__(self, cutoff_abund, seq_distance_method, profile_distance_method='unifrac', ignore_cache=False, remove_se=False, maj_only=False, remove_se_clade_props=False, sqrt=True):
         # root_dir is the root dir of the git repo
         self.root_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -139,6 +143,11 @@ class RestrepoAnalysis:
         # whether to produce the between sample calde proportion dfs with the s. hystrix samples removed
         # along with the paried info df that will be used in R to conduct a permanova
         self.remove_se_clade_props = remove_se_clade_props
+        # whether to use the sqrt transformed between sample distance matrices
+        # or use the matrices produced without using the sqrt (at the reviewers request)
+        # This will be used to produce distance matrices that can be run in the
+        # PERMANOVAs and the Betadisper tests.
+        self.sqrt = sqrt
 
         self.clades = list('ACD')
         self.clade_genera_labels = ['Symbiodinium', 'Cladocopium', 'Durusdinium']
@@ -156,7 +165,8 @@ class RestrepoAnalysis:
         self.profile_distance_method = profile_distance_method
 
         # Between profile distances dataframe holder dict before 0.05 cutoff
-        # This same dict will be used to hold the pre-cutoff profile dfs regardless of the dist method used.
+        # The distance method that has been used in making the matrices is
+        # defined as an input to this class.
         self.between_profile_clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict()
 
@@ -189,8 +199,9 @@ class RestrepoAnalysis:
                     self._populate_clade_dist_df_dict(cct_specific='040')
 
         # Between sample distances dataframe
-        # This one dict will be used to hold the between-sample distance dfs regardless of what
-        # distance method is employed.
+        # This one dict will be used to hold the between-sample distance dfs
+        # The distance method that has been used in making the matrices is
+        # defined as an input to this class.
         self.between_sample_clade_dist_df_dict = {}
         self._populate_clade_dist_df_dict(smp_dist=True)
 
@@ -246,6 +257,8 @@ class RestrepoAnalysis:
         self.daily_temperature_range_df = None
         self._make_temp_df()
         self.remotely_sensed_sst_df = self._make_remotely_sensed_sst_df()
+
+
 
         # ITS2 sequence abundance (post-MED) dataframe
         self.post_med_seq_abundance_relative_df = self._post_med_seq_abundance_relative_df()
@@ -318,6 +331,373 @@ class RestrepoAnalysis:
         self.site_lat_long_tups = {site: (lat, long) for site, lat, long in zip(sites, y_site_coords, x_site_coords)}
 
         self._del_propblem_sample()
+
+
+
+
+
+    def seq_to_profile_symbiodinium_figure(self):
+        """Figure that shows stacked bar plots of post_med_seqs and profiles of the samples
+        that were found to contain the 6 most abundant symbiodinium profiles considering the 0.4 cutoff.
+        This figure will be in two parts, the first part will be the Symbiodinium only stacked
+        sequence abundances, normalised to 1. The second part will be the Symbiodinium profiles of those samples.
+        Only samples will be considered that have the six most abundant symbiodinium profiles at an abudnace
+        >= 0.4. This figure will basically be a more detailed plotting of 6 of the profiles form the high
+        abundance dendro figure.
+        We will deduce the six most abundant Symbiodinium types from scratch rather than picking the exact
+        names from the dendro figure as a santiy check to make sure that they are in agreement.
+        We will then identify the samples that we will be plotting.
+        We will then need to work out the best order in which to plot these samples before finally making the two
+        plots and annotating them appropriately.
+
+        relative sequence abundances are in self.post_med_seq_abundance_relative_df
+        we can get the info for the samples form
+        a df that has the relative abundance of profiles with only those above 0.4 is
+        self.profile_abundance_df_cutoff_high
+        We can get the info for the profiles from self.profile_meta_info_df
+        We can get the most abundant profiles form prof_uid_to_local_abund_dict_cutoff_high. Just look for the cladeA's
+
+        Its actually looking pretty mental at the moment. Lets try sorting accroding to host-species.
+        """
+
+        # First get the 6 most abundant Symbiodinium profiles
+        # Actually let's work with top 8 as we want to include the dark blue coral host
+        sorted_symbiodinium_local_abund_tups = sorted([(seq_uid, high_local_abund) for seq_uid, high_local_abund in self.prof_uid_to_local_abund_dict_cutoff_high.items() if self.profile_meta_info_df.at[seq_uid, 'Clade'] == 'A'], key=lambda x: x[1], reverse=True)
+        # top_8_uid = [uid for uid, abund in sorted_symbiodinium_local_abund_tups[:8]]
+
+        # Manually code the order of the 8 to match host specieis specificity
+        # top_8_uid = [37589, 38194, 38190, 37587, 38195, 38262, 38193, 38168]
+
+        # Only do the most abundant for each of the host species
+        # top_8_uid = [37589,  38195, 38193, 38168]
+
+        # Let's try with the extra two close profiles
+        top_8_uid = [37589, 38194, 38190, 38195, 38193, 38168]
+
+        # Now get the sample uids that we need to be working with
+        # i.e. the samples that had these profiles above the 0.4 abund
+
+        # this will be a dictionary where the profile uid will be a key and the value will be
+        # a list of the sample uids in order of their A1 relative content
+        prof_uid_to_contained_samples = {}
+        for prof_uid in top_8_uid:
+            # series of the profile uid containing only the samples that > 0 rel abundance
+            sample_uids_of_profile = self.profile_abundance_df_cutoff_high[prof_uid][self.profile_abundance_df_cutoff_high[prof_uid] > 0].index.values.tolist()
+            # sort the list of uids according to the relative proportion of A1 sequence as a proportion of their Symbiodinium sequences
+            a1_abund_dict = {}
+            for sample_uid in sample_uids_of_profile:
+                non_zero_seq_abundances = self.post_med_seq_abundance_relative_df.loc[sample_uid][
+                    self.post_med_seq_abundance_relative_df.loc[sample_uid] > 0]
+                clade_a_non_zero = non_zero_seq_abundances[
+                    [seq_name for seq_name in list(non_zero_seq_abundances.index) if 'A' in seq_name]]
+                sample_total = clade_a_non_zero.sum()
+                a1_abund_dict[sample_uid] = clade_a_non_zero['A1']/sample_total
+
+            prof_uid_to_contained_samples[prof_uid] = sorted(a1_abund_dict, key=a1_abund_dict.get, reverse=True)
+
+            foo = 'bar'
+
+        # Optional, randomly subsample the contained samples to n=11
+
+        # at this point we have a sorted list of the 8 most abundant profiles.
+        # We also have a dict that can give us the samples that we will be working with for each of those profiles.
+
+        # Now we can start with the plotting
+        # For starters lets go in order of the profiles,
+        # do each sample in a random order to start with. It may be that we want to work with
+        # a set of tuples rather than the secondary dictionary. But there again, we may end up sorting the samples
+        # by relative abundance of the most abundant sequenes. Let's just get the plots up on the screen first
+        # and see where we can go from there.
+        # As we go we should keep cummulative track of the relative abundances
+
+        # Need to get an overall abundance for the symbiodinium sequences in the samples in question
+        dd_seq_rel_abund_counter = defaultdict(int)
+        for prof_uid in top_8_uid:
+            for sample_uid in prof_uid_to_contained_samples[prof_uid]:
+                non_zero_seq_abundances = self.post_med_seq_abundance_relative_df.loc[sample_uid][self.post_med_seq_abundance_relative_df.loc[sample_uid] > 0]
+                clade_a_non_zero = non_zero_seq_abundances[[seq_name for seq_name in list(non_zero_seq_abundances.index) if 'A' in seq_name]]
+                sample_total = clade_a_non_zero.sum()
+                for ser_index, rel_abund in clade_a_non_zero.iteritems():
+                    new_rel_abund = rel_abund / sample_total
+                    dd_seq_rel_abund_counter[ser_index] += new_rel_abund
+
+        sorted_seqs = sorted(dd_seq_rel_abund_counter, key=dd_seq_rel_abund_counter.get, reverse=True)
+        our_colour_dict = {}
+        colour_hash_iterator = iter(self.get_colour_list())
+        pre_def_colour_dict = self.get_pre_def_colour_dict()
+        greys = itertools.cycle(['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F'])
+        for seq_name in sorted_seqs:
+            if seq_name in pre_def_colour_dict:
+                our_colour_dict[seq_name] = pre_def_colour_dict[seq_name]
+            else:
+                try:
+                    our_colour_dict[seq_name] = next(colour_hash_iterator)
+                except StopIteration:
+                    our_colour_dict[seq_name] = next(greys)
+
+
+        # As we populate the first one, lets keep track of which seqs are in which profiles groups and in order of abund
+        seqs_in_profile_group_dict = {}
+        fig, ax_arr = plt.subplots(1,4, figsize=(20,5))
+        patches_list = []
+        x_index_for_plot = 0
+        colour_list = []
+        # We want to put an asterix above the sample columns that aren't of the predominant host-species
+        # To do this, we need to know which species are not of the main host species.
+        # We only need to know this for the 37589 profile as this is the only one with multiple species origins.
+        index_of_non_maj_species_list = []
+        for prof_uid in top_8_uid:
+            seq_cum_abund_dict = defaultdict(float)
+            for sample_uid in prof_uid_to_contained_samples[prof_uid]:
+                if prof_uid == 37589:
+                    if self.experimental_metadata_info_df.at[sample_uid, 'species'] != 'PC':
+                        index_of_non_maj_species_list.append(prof_uid_to_contained_samples[prof_uid].index(sample_uid))
+                non_zero_seq_abundances = self.post_med_seq_abundance_relative_df.loc[sample_uid][self.post_med_seq_abundance_relative_df.loc[sample_uid] > 0]
+                clade_a_non_zero = non_zero_seq_abundances[[seq_name for seq_name in list(non_zero_seq_abundances.index) if 'A' in seq_name]]
+
+                bottom = 0
+                # for each sequence, create a rect patch
+                # the rect will be 1 in width and centered about the ind value.
+                sample_total = clade_a_non_zero.sum()
+                for ser_index, rel_abund in clade_a_non_zero.iteritems():
+                    new_rel_abund = rel_abund / sample_total
+                    seq_cum_abund_dict[ser_index] += new_rel_abund
+                    patches_list.append(Rectangle(
+                        (x_index_for_plot - 0.5, bottom),
+                        1,
+                        new_rel_abund, color=our_colour_dict[ser_index]))
+                    bottom += new_rel_abund
+                    colour_list.append(our_colour_dict[ser_index])
+                x_index_for_plot += 1
+            x_index_for_plot += 5
+            seqs_in_profile_group_dict[prof_uid] = sorted(seq_cum_abund_dict, key=seq_cum_abund_dict.get, reverse=True)
+        listed_colour_map = ListedColormap(colour_list)
+        patches_collection = PatchCollection(patches_list, cmap=listed_colour_map)
+        patches_collection.set_array(np.arange(len(patches_list)))
+        ax_arr[0].add_collection(patches_collection)
+        ax_arr[0].autoscale_view()
+        ax_arr[0].figure.canvas.draw()
+        foo = 'bar'
+
+        # finally lets plot up a legend
+        lp = LegendPlotter(ordered_list_of_seq_names=sorted_seqs, colour_dict=our_colour_dict, ax=ax_arr[-1], max_rows=10)
+        lp.plot_legend_seqs()
+
+        patches_list = []
+        x_index_for_plot = 0
+        colour_list = []
+        for prof_uid in top_8_uid:
+            new_rel_abund = 1 / len(seqs_in_profile_group_dict[prof_uid])
+            for sample_uid in prof_uid_to_contained_samples[prof_uid]:
+                non_zero_seq_abundances = self.post_med_seq_abundance_relative_df.loc[sample_uid][
+                    self.post_med_seq_abundance_relative_df.loc[sample_uid] > 0]
+                present_seqs = non_zero_seq_abundances[
+                    [seq_name for seq_name in list(non_zero_seq_abundances.index) if 'A' in seq_name]].index.values.tolist()
+
+                bottom = 0
+                # for each sequence, create a rect patch
+                # the rect will be 1 in width and centered about the ind value.
+                for seq_name in seqs_in_profile_group_dict[prof_uid]:
+                    if seq_name in present_seqs:
+                        patches_list.append(Rectangle(
+                            (x_index_for_plot - 0.5, bottom),
+                            1,
+                            new_rel_abund, color=our_colour_dict[seq_name]))
+                        colour_list.append(our_colour_dict[seq_name])
+                    else:
+                        # If seq wasn't present, then plot in colour
+                        patches_list.append(Rectangle(
+                            (x_index_for_plot - 0.5, bottom),
+                            1,
+                            new_rel_abund, color='#ffffff'))
+                        colour_list.append('#ffffff')
+                    bottom += new_rel_abund
+
+                x_index_for_plot += 1
+            x_index_for_plot += 5
+
+        listed_colour_map = ListedColormap(colour_list)
+        patches_collection = PatchCollection(patches_list, cmap=listed_colour_map)
+        patches_collection.set_array(np.arange(len(patches_list)))
+        ax_arr[1].add_collection(patches_collection)
+        ax_arr[1].autoscale_view()
+        ax_arr[1].figure.canvas.draw()
+
+        # Finally plot up the profiles that are found in each of the samples
+        # NB we want all of the Symbiodinium profiles found, not just the low level ones.
+        # First get the order of abundance for the cumulative relative abundance so that we can plot these
+        per_top_eight_prof_cum_abund_dict = defaultdict(float)
+        for prof_uid in top_8_uid:
+            for sample_uid in prof_uid_to_contained_samples[prof_uid]:
+                non_zero_prof_abundances = self.profile_abundance_df.loc[sample_uid][
+                    self.profile_abundance_df.loc[sample_uid] > 0]
+                clade_a_non_zero = non_zero_prof_abundances[
+                    [prof_uid for prof_uid in list(non_zero_prof_abundances.index) if self.profile_meta_info_df.at[prof_uid, 'Clade'] == 'A']]
+                sample_total = clade_a_non_zero.sum()
+                for ser_index, rel_abund in clade_a_non_zero.iteritems():
+                    per_top_eight_prof_cum_abund_dict[ser_index] += rel_abund/sample_total
+
+        # Now we can go back through and plot in order of the profiles
+        prof_order = sorted(per_top_eight_prof_cum_abund_dict, key=per_top_eight_prof_cum_abund_dict.get, reverse=True)
+
+        colour_palette_pas_gen = ('#%02x%02x%02x' % rgb_tup for rgb_tup in
+                              self.create_colour_list(mix_col=(255, 255, 255), sq_dist_cutoff=5000, num_cols=8,
+                                                         time_out_iterations=10000))
+        prof_colour_dict = {}
+        for prof_uid in prof_order:
+            try:
+                prof_colour_dict[prof_uid] = next(colour_palette_pas_gen)
+            except StopIteration:
+                prof_colour_dict[prof_uid] = next(greys)
+
+        # Now we can plot up the profiles.
+        x_index_for_plot = 0
+        patches_list = []
+        colour_list = []
+        for prof_uid in top_8_uid:
+            for sample_uid in prof_uid_to_contained_samples[prof_uid]:
+                bottom = 0
+                non_zero_prof_abundances = self.profile_abundance_df.loc[sample_uid][
+                    self.profile_abundance_df.loc[sample_uid] > 0]
+                clade_a_non_zero = non_zero_prof_abundances[
+                    [prof_uid for prof_uid in list(non_zero_prof_abundances.index) if
+                     self.profile_meta_info_df.at[prof_uid, 'Clade'] == 'A']]
+                sample_total = clade_a_non_zero.sum()
+                for prof_uid in prof_order:
+                    if prof_uid not in clade_a_non_zero:
+                        continue
+                    new_rel_abund = clade_a_non_zero[prof_uid]/sample_total
+                    patches_list.append(Rectangle(
+                        (x_index_for_plot - 0.5, bottom),
+                        1,
+                        new_rel_abund, color=prof_colour_dict[prof_uid]))
+                    bottom += new_rel_abund
+                    colour_list.append(prof_colour_dict[prof_uid])
+                x_index_for_plot += 1
+            x_index_for_plot += 5
+        listed_colour_map = ListedColormap(colour_list)
+        patches_collection = PatchCollection(patches_list, cmap=listed_colour_map)
+        patches_collection.set_array(np.arange(len(patches_list)))
+        ax_arr[2].add_collection(patches_collection)
+        ax_arr[2].autoscale_view()
+        ax_arr[2].figure.canvas.draw()
+
+
+
+
+        fig.savefig(os.path.join(self.figure_dir, 'symbiodinium_profiles.png'), dpi=1200)
+        fig.savefig(os.path.join(self.figure_dir, 'symbiodinium_profiles.svg'), dpi=1200)
+        foo = 'bar'
+        bar = 'ffo.'
+
+    def create_colour_list(self,
+            sq_dist_cutoff=None, mix_col=None, num_cols=50, time_out_iterations=10000, avoid_black_and_white=True):
+        new_colours = []
+        min_dist = []
+        attempt = 0
+        while len(new_colours) < num_cols:
+            attempt += 1
+            # Check to see if we have run out of iteration attempts to find a colour that fits into the colour space
+            if attempt > time_out_iterations:
+                sys.exit('Colour generation timed out. We have tried {} iterations of colour generation '
+                         'and have not been able to find a colour that fits into your defined colour space.\n'
+                         'Please lower the number of colours you are trying to find, '
+                         'the minimum distance between them, or both.'.format(attempt))
+            if mix_col:
+                r = int((random.randint(0, 255) + mix_col[0]) / 2)
+                g = int((random.randint(0, 255) + mix_col[1]) / 2)
+                b = int((random.randint(0, 255) + mix_col[2]) / 2)
+            else:
+                r = random.randint(0, 255)
+                g = random.randint(0, 255)
+                b = random.randint(0, 255)
+
+            # now check to see whether the new colour is within a given distance
+            # if the avoids are true also
+            good_dist = True
+            if sq_dist_cutoff:
+                dist_list = []
+                for i in range(len(new_colours)):
+                    distance = (new_colours[i][0] - r) ** 2 + (new_colours[i][1] - g) ** 2 + (
+                                new_colours[i][2] - b) ** 2
+                    dist_list.append(distance)
+                    if distance < sq_dist_cutoff:
+                        good_dist = False
+                        break
+                # now check against black and white
+                d_to_black = (r - 0) ** 2 + (g - 0) ** 2 + (b - 0) ** 2
+                d_to_white = (r - 255) ** 2 + (g - 255) ** 2 + (b - 255) ** 2
+                if avoid_black_and_white:
+                    if d_to_black < sq_dist_cutoff or d_to_white < sq_dist_cutoff:
+                        good_dist = False
+                if dist_list:
+                    min_dist.append(min(dist_list))
+            if good_dist:
+                new_colours.append((r, g, b))
+                attempt = 0
+
+        return new_colours
+
+    def get_pre_def_colour_dict(self):
+        """These are the top 40 most abundnant named sequences. I have hardcoded their color."""
+        return {
+            'A1': "#FFFF00", 'C3': "#1CE6FF", 'C15': "#FF34FF", 'A1bo': "#FF4A46", 'D1': "#008941",
+            'C1': "#006FA6", 'C27': "#A30059", 'D4': "#FFDBE5", 'C3u': "#7A4900", 'C42.2': "#0000A6",
+            'A1bp': "#63FFAC", 'C115': "#B79762", 'C1b': "#004D43", 'C1d': "#8FB0FF", 'A1c': "#997D87",
+            'C66': "#5A0007", 'A1j': "#809693", 'B1': "#FEFFE6", 'A1k': "#1B4400", 'A4': "#4FC601",
+            'A1h': "#3B5DFF", 'C50a': "#4A3B53", 'C39': "#FF2F80", 'C3dc': "#61615A", 'D4c': "#BA0900",
+            'C3z': "#6B7900", 'C21': "#00C2A0", 'C116': "#FFAA92", 'A1cc': "#FF90C9", 'C72': "#B903AA",
+            'C15cl': "#D16100", 'C31': "#DDEFFF", 'C15cw': "#000035", 'A1bv': "#7B4F4B", 'D6': "#A1C299",
+            'A4m': "#300018", 'C42a': "#0AA6D8", 'C15cr': "#013349", 'C50l': "#00846F", 'C42g': "#372101"}
+
+    def get_colour_list(self):
+        colour_list = [
+            "#FFB500", "#C2FFED", "#A079BF", "#CC0744", "#C0B9B2", "#C2FF99", "#001E09", "#00489C", "#6F0062",
+            "#0CBD66",
+            "#EEC3FF", "#456D75", "#B77B68", "#7A87A1", "#788D66", "#885578", "#FAD09F", "#FF8A9A", "#D157A0",
+            "#BEC459",
+            "#456648", "#0086ED", "#886F4C", "#34362D", "#B4A8BD", "#00A6AA", "#452C2C", "#636375", "#A3C8C9",
+            "#FF913F",
+            "#938A81", "#575329", "#00FECF", "#B05B6F", "#8CD0FF", "#3B9700", "#04F757", "#C8A1A1", "#1E6E00",
+            "#7900D7",
+            "#A77500", "#6367A9", "#A05837", "#6B002C", "#772600", "#D790FF", "#9B9700", "#549E79", "#FFF69F",
+            "#201625",
+            "#72418F", "#BC23FF", "#99ADC0", "#3A2465", "#922329", "#5B4534", "#FDE8DC", "#404E55", "#0089A3",
+            "#CB7E98",
+            "#A4E804", "#324E72", "#6A3A4C", "#83AB58", "#001C1E", "#D1F7CE", "#004B28", "#C8D0F6", "#A3A489",
+            "#806C66",
+            "#222800", "#BF5650", "#E83000", "#66796D", "#DA007C", "#FF1A59", "#8ADBB4", "#1E0200", "#5B4E51",
+            "#C895C5",
+            "#320033", "#FF6832", "#66E1D3", "#CFCDAC", "#D0AC94", "#7ED379", "#012C58", "#7A7BFF", "#D68E01",
+            "#353339",
+            "#78AFA1", "#FEB2C6", "#75797C", "#837393", "#943A4D", "#B5F4FF", "#D2DCD5", "#9556BD", "#6A714A",
+            "#001325",
+            "#02525F", "#0AA3F7", "#E98176", "#DBD5DD", "#5EBCD1", "#3D4F44", "#7E6405", "#02684E", "#962B75",
+            "#8D8546",
+            "#9695C5", "#E773CE", "#D86A78", "#3E89BE", "#CA834E", "#518A87", "#5B113C", "#55813B", "#E704C4",
+            "#00005F",
+            "#A97399", "#4B8160", "#59738A", "#FF5DA7", "#F7C9BF", "#643127", "#513A01", "#6B94AA", "#51A058",
+            "#A45B02",
+            "#1D1702", "#E20027", "#E7AB63", "#4C6001", "#9C6966", "#64547B", "#97979E", "#006A66", "#391406",
+            "#F4D749",
+            "#0045D2", "#006C31", "#DDB6D0", "#7C6571", "#9FB2A4", "#00D891", "#15A08A", "#BC65E9", "#FFFFFE",
+            "#C6DC99",
+            "#203B3C", "#671190", "#6B3A64", "#F5E1FF", "#FFA0F2", "#CCAA35", "#374527", "#8BB400", "#797868",
+            "#C6005A",
+            "#3B000A", "#C86240", "#29607C", "#402334", "#7D5A44", "#CCB87C", "#B88183", "#AA5199", "#B5D6C3",
+            "#A38469",
+            "#9F94F0", "#A74571", "#B894A6", "#71BB8C", "#00B433", "#789EC9", "#6D80BA", "#953F00", "#5EFF03",
+            "#E4FFFC",
+            "#1BE177", "#BCB1E5", "#76912F", "#003109", "#0060CD", "#D20096", "#895563", "#29201D", "#5B3213",
+            "#A76F42",
+            "#89412E", "#1A3A2A", "#494B5A", "#A88C85", "#F4ABAA", "#A3F3AB", "#00C6C8", "#EA8B66", "#958A9F",
+            "#BDC9D2",
+            "#9FA064", "#BE4700", "#658188", "#83A485", "#453C23", "#47675D", "#3A3F00", "#061203", "#DFFB71",
+            "#868E7E",
+            "#98D058", "#6C8F7D", "#D7BFC2", "#3C3E6E", "#D83D66", "#2F5D9B", "#6C5E46", "#D25B88", "#5B656C",
+            "#00B57F",
+            "#545C46", "#866097", "#365D25", "#252F99", "#00CCFF", "#674E60", "#FC009C", "#92896B"]
+        return colour_list
 
     def get_list_of_clade_col_type_uids_for_unifrac(self, high_low=None):
         """
@@ -1101,8 +1481,8 @@ class RestrepoAnalysis:
         self.seq_abs_abund_post_med_ouput_path = os.path.join(self.base_sp_output_dir, 'post_med_seqs', '77_DBV_20190721_2019-08-06_09-21-49.148787.seqs.absolute.abund_and_meta.txt')
 
         # Paths to seq count tables pre_med
-        self.seq_rel_abund_pre_med_ouput_path_list = [os.path.join(self.base_sp_output_dir, 'pre_med_seqs',
-                                                              f'pre_med_relative_abundance_df_{uid}.csv') for uid in ['341', '349', '350']]
+        self.seq_abs_abund_pre_med_ouput_path = os.path.join(self.base_sp_output_dir, 'pre_med_seqs',
+                                                              'pre_med_absolute_abundance_df.csv')
 
 
         # Paths to the standard output profile distance files braycurtis derived
@@ -1181,6 +1561,16 @@ class RestrepoAnalysis:
             'A': os.path.join(self.base_sp_output_dir, 'between_sample_distances_unifrac', 'A', '2019-08-06_09-21-49.148787_unifrac_btwn_sample_distances_A.dist'),
             'C': os.path.join(self.base_sp_output_dir, 'between_sample_distances_unifrac', 'C', '2019-08-06_09-21-49.148787_unifrac_btwn_sample_distances_C.dist'),
             'D': os.path.join(self.base_sp_output_dir, 'between_sample_distances_unifrac', 'D', '2019-08-06_09-21-49.148787_unifrac_btwn_sample_distances_D.dist')
+        }
+
+        # Paths to the smpl distance (Unifrac non-sqrt transformed abundance)
+        self.between_sample_clade_dist_path_dict_unifrac_no_sqrt = {
+            'A': os.path.join(self.base_sp_output_dir, 'between_sample_distances_unifrac_no_sqrt', 'A',
+                              '2020-01-01_05-04-01.976271_unifrac_btwn_sample_distances_A.dist'),
+            'C': os.path.join(self.base_sp_output_dir, 'between_sample_distances_unifrac_no_sqrt', 'C',
+                              '2020-01-01_05-04-01.976271_unifrac_btwn_sample_distances_C.dist'),
+            'D': os.path.join(self.base_sp_output_dir, 'between_sample_distances_unifrac_no_sqrt', 'D',
+                              '2020-01-01_05-04-01.976271_unifrac_btwn_sample_distances_D.dist')
         }
 
     def _populate_seq_meta_data_df(self):
@@ -1742,39 +2132,43 @@ class RestrepoAnalysis:
             return df
 
     def _pre_med_seq_abundance_relative_df(self):
-        """we will produce a df that is index as sample_uid and sequence name as cols.
-        The only problem is that we have three separate pre-med csvs to work with so we will have to do some
-        consolidation. We will also likely have to grab a list of uids or names from which to get a master
-        fasta out of the SymPortal db."""
+        """
+        UPDATE: The df is taking ages to create and I haven't got it to create successfully yet. I may leave it working
+        over night. But for the time being we will ignore having the pre-med seqs in the figure and work from
+        the post-med seqs.
+        The only place that we are going to use the pre_med seqs is in the new figure
+        suggested by reviewer 1. Previously we had the three pre_med seq outputs seperated by the three
+        datasets that made up all of Alejandros sampls. However, this was before we were properly curating the
+        premed sequences, and the naming was a bit of a mess. With the newer version of SymPortal that we have
+        now, the pre_med sequences are much better curated. In the new outputs, all of the pre-med seq info
+        from the three datasets is combined into a single dataset. we will use this output to make the pre-med
+        part of the new figure we are going to make. Becuase we need the post med and profile parts to match up
+        with all of the other aspects of this study however, we will have to use the three data set separated version
+        of the alejandro outputs for the post med and profile parts of the figure. So, this means working with
+        new and original outputs all in one figure. The new all together premed output will obviously have different
+        sample UIDs, and the names are not exact matches. However, we should be able to some how get the names to match
+        the original namings of the samples. Here, I will make a dataframe where the index matches the
+        sample uids of the original outputs and the columns will be the sequence names. We will disregards any of
+        the work we were trying to do previously here where we were trying join up three sepearte pre-med csv outputs.
+        """
         if os.path.exists(os.path.join(self.cache_dir, 'seq_df_pre_med.p')):
             return pickle.load(open(os.path.join(self.cache_dir, 'seq_df_pre_med.p'), 'rb'))
         else:
-            list_of_dfs = []
-            for pre_seq_output_path in self.seq_rel_abund_pre_med_ouput_path_list:
-                with open(pre_seq_output_path, 'r') as f:
-                    seq_data = [out_line.split(',') for out_line in [line.rstrip() for line in f]]
-                cols = seq_data[0][2:]
-                # change the strange format of the unk_C_XXX
-                new_cols = []
-                for col_item in cols:
-                    if 'unk' in col_item:
-                        split_list = col_item.split('_')
-                        new_cols.append(f'{split_list[2]}_{split_list[1]}')
-                    else:
-                        new_cols.append(col_item)
-                seq_data = seq_data[1:]
-                ind = [int(sub[0]) for sub in seq_data]
-                seq_data = [sub[2:] for sub in seq_data]
-                print('a pre-med df was created')
-                df = pd.DataFrame(seq_data, columns=new_cols, index=ind).astype('float')
-                list_of_dfs.append(df)
-                # df = pd.read_csv(filepath_or_buffer=pre_seq_output_path, sep='\t', index_col=0, header=0)
-            print('first append')
-            master_df = list_of_dfs[0].append(list_of_dfs[1]).fillna(0).astype('float')
-            print('second append')
-            master_df = master_df.append(list_of_dfs[2])
-            pickle.dump(master_df, open(os.path.join(self.cache_dir, 'seq_df_pre_med.p'), 'wb'))
-            return master_df
+            df = pd.read_csv(self.seq_abs_abund_pre_med_ouput_path)
+            foo = 'bar'
+            # with open(self.seq_abs_abund_pre_med_ouput_path, 'r') as f:
+            #     seq_data = [out_line.split(',') for out_line in [line.rstrip() for line in f]]
+            # cols = seq_data[0][2:]
+            # seq_data = seq_data[1:]
+            # ind = [int(sub[0]) for sub in seq_data]
+            # seq_data = [sub[2:] for sub in seq_data]
+            # print('a pre-med df was created')
+            # df = pd.DataFrame(seq_data, columns=cols, index=ind).astype('float')
+            # list_of_dfs.append(df)
+            # # df = pd.read_csv(filepath_or_buffer=pre_seq_output_path, sep='\t', index_col=0, header=0)
+            #
+            # pickle.dump(master_df, open(os.path.join(self.cache_dir, 'seq_df_pre_med.p'), 'wb'))
+            # return master_df
 
     def _init_metadata_info_df(self):
         """ This method produces a dataframe that has sample UID as key and
@@ -1922,8 +2316,14 @@ class RestrepoAnalysis:
     def pop_clade_dist_df_dict_from_cache_or_make_new(self, cct_specific, smp_dist):
         try:
             if smp_dist:
-                self.between_sample_clade_dist_df_dict = pickle.load(
-                    file=open(os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}.p'), 'rb'))
+                if self.sqrt:
+                    self.between_sample_clade_dist_df_dict = pickle.load(
+                        file=open(os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}.p'), 'rb'))
+                else:
+                    self.between_sample_clade_dist_df_dict = pickle.load(
+                        file=open(
+                            os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}_no_sqrt.p'),
+                            'rb'))
             elif cct_specific:
                 if cct_specific == 'low':
                     self.profile_distance_df_dict_cutoff_low = pickle.load(
@@ -1953,7 +2353,11 @@ class RestrepoAnalysis:
 
     def _pop_clade_dist_df_dict_from_scratch(self, cct_specific, smp_dist):
         if smp_dist:
-            if self.seq_distance_method == 'braycurtis':
+            if not self.sqrt:
+                # The non-square root option is only available for unifrac
+                # this was done at the reviewers request.
+                path_dict_to_use = self.between_sample_clade_dist_path_dict_unifrac_no_sqrt
+            elif self.seq_distance_method == 'braycurtis':
                 path_dict_to_use = self.between_sample_clade_dist_path_dict_braycurtis
             elif self.seq_distance_method == 'unifrac':
                 path_dict_to_use = self.between_sample_clade_dist_path_dict_unifrac
@@ -2008,8 +2412,14 @@ class RestrepoAnalysis:
 
         # pickle out the distance dataframe dictionaries according to what sort of dist they are.
         if smp_dist:
-            pickle.dump(obj=self.between_sample_clade_dist_df_dict,
-                        file=open(os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}.p'), 'wb'))
+            if self.sqrt:
+                pickle.dump(obj=self.between_sample_clade_dist_df_dict,
+                            file=open(os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}.p'), 'wb'))
+            else:
+                pickle.dump(obj=self.between_sample_clade_dist_df_dict,
+                            file=open(
+                                os.path.join(self.cache_dir, f'sample_clade_dist_df_dict_{self.seq_distance_method}_no_sqrt.p'),
+                                'wb'))
         elif cct_specific:
             if cct_specific == 'low':
                 pickle.dump(obj=self.profile_distance_df_dict_cutoff_low,
@@ -3546,7 +3956,8 @@ class RestrepoAnalysis:
     def permute_sample_permanova(self):
         meta_df = self.experimental_metadata_info_df
         for clade in self.clades:
-
+            # The between sample distance matrices that this contains (unifrac, braycurtis, no sqrt) will
+            # be determined by the arguments passed to the restrepo class and during init of the class.
             clade_sample_dist_df = self.between_sample_clade_dist_df_dict[clade]
             if self.seq_distance_method == 'braycurtis':
 
@@ -3569,6 +3980,9 @@ class RestrepoAnalysis:
                     clade_sample_dist_df = self._remove_non_maj_from_df(clade_sample_dist_df=clade_sample_dist_df, clade=clade)
                     output_path_dist_matrix = os.path.join(self.outputs_dir,
                                                            f'dists_permanova_samples_{clade}_{self.seq_distance_method}_only_maj.csv')
+                elif not self.sqrt:
+                    output_path_dist_matrix = os.path.join(self.outputs_dir,
+                                                           f'dists_permanova_samples_{clade}_{self.seq_distance_method}_no_sqrt.csv')
                 else:
                     output_path_dist_matrix = os.path.join(self.outputs_dir, f'dists_permanova_samples_{clade}_{self.seq_distance_method}.csv')
 
@@ -3580,7 +3994,11 @@ class RestrepoAnalysis:
                 output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_{self.seq_distance_method}_no_se.csv')
             elif self.maj_only:
                 output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_{self.seq_distance_method}_only_maj.csv')
+            elif not self.sqrt:
+                output_path_meta_info = os.path.join(self.outputs_dir,
+                                                     f'sample_meta_info_{clade}_{self.seq_distance_method}_no_sqrt.csv')
             else:
+                # We can use the same meta info table regarless of distance method
                 output_path_meta_info = os.path.join(self.outputs_dir, f'sample_meta_info_{clade}_{self.seq_distance_method}.csv')
 
 
@@ -3671,6 +4089,7 @@ class RestrepoAnalysis:
         print('\n\nusing the 0.05 cutoff profile df')
         self._calc_av_rank_of_clade_profile(df_to_calculate_from=self.profile_abundance_df_cutoff)
         foo = 'bar'
+
     def _calc_av_rank_of_clade_profile(self, df_to_calculate_from):
         # we can also ask the question of what the average rank of the type was. For example, on average, Cladocopium its2 type profile was the 1.4th most abundant profile
         # we could also plot this as we can have an average value for each profile and average these in turn with a n value. the stdv will then
@@ -4181,9 +4600,107 @@ class MetaInfoPlotter:
             return y0_list, x0_list, heights_list, width_list
 
 
+class LegendPlotter:
+    """This class can be used by the SeqStackedBarPlotter and the TypeStackedBarPlotter to handle
+    the plotting of the legend subplot.
+    """
+    def __init__(self, ax, ordered_list_of_seq_names, colour_dict, max_rows=4, max_cols=4):
+        # whether we are plotting types
+        self.ax_to_plot_on = ax
+        self.colour_dict = colour_dict
+        self.max_n_cols = max_cols
+        self.max_n_rows = max_rows
+        self.num_leg_cells = max_rows * max_cols
+        self.ordered_list_of_seqs_names = ordered_list_of_seq_names
+        # legend setup parameters
+        self.y_coord_increments = 100 / max_rows
+        self.leg_box_depth = 2 / 3 * self.y_coord_increments
+
+        self.x_coord_increments = 100 / max_cols
+        self.leg_box_width = self.x_coord_increments / 3
+        self.n_rows = None
+        self.last_row_len = None
+        self._set_n_rows_and_last_row_len()
+        self.column_count = 0
+
+
+    def plot_legend_seqs(self):
+        self._set_ylim_and_x_lim_and_invert_y_axis()
+
+        self._plot_legend_rows()
+
+        self._remove_frames_from_axis()
+
+    def _plot_legend_rows(self):
+
+        sys.stdout.write(
+            f'\nGenerating figure legend for {str(self.num_leg_cells)} most common sequences\n')
+
+
+        for row_increment in range(min(self.n_rows, self.max_n_rows)):
+
+            if self._this_is_last_row_of_legend(row_increment=row_increment):
+                for col_increment in range(self.max_n_cols):
+                    self._plot_legend_row(row_increment=row_increment, col_increment=col_increment)
+                    self.column_count += 1
+            else:
+                for col_increment in range(self.last_row_len):
+                    self._plot_legend_row(row_increment=row_increment, col_increment=col_increment)
+                    self.column_count += 1
+
+    def _set_ylim_and_x_lim_and_invert_y_axis(self):
+        # Once we know the number of rows, we can also adjust the y axis limits
+        self.ax_to_plot_on.set_xlim(0, 100)
+        self.ax_to_plot_on.set_ylim(0, ((self.n_rows - 1) * self.y_coord_increments) + self.leg_box_depth)
+        self.ax_to_plot_on.invert_yaxis()
+
+    def _set_n_rows_and_last_row_len(self):
+        col_elements_to_plot = len(self.ordered_list_of_seqs_names)
+
+        if col_elements_to_plot < self.num_leg_cells:
+            if col_elements_to_plot % self.max_n_cols != 0:
+                self.n_rows = int(col_elements_to_plot / self.max_n_cols) + 1
+                self.last_row_len = col_elements_to_plot % self.max_n_cols
+            else:
+                self.n_rows = int(col_elements_to_plot / self.max_n_cols)
+                self.last_row_len = self.max_n_cols
+        else:
+            self.n_rows = self.max_n_rows
+            self.last_row_len = self.max_n_cols
+
+    def _this_is_last_row_of_legend(self, row_increment):
+        return (row_increment + 1) != self.n_rows
+
+    def _remove_frames_from_axis(self):
+        self.ax_to_plot_on.set_frame_on(False)
+        self.ax_to_plot_on.get_xaxis().set_visible(False)
+        self.ax_to_plot_on.get_yaxis().set_visible(False)
+
+    def _plot_legend_row(self, row_increment, col_increment):
+        leg_box_x, leg_box_y = self._add_legend_rect(col_increment=col_increment, row_increment=row_increment)
+        self._add_legend_text(leg_box_x, leg_box_y)
+
+    def _add_legend_text(self, leg_box_x, leg_box_y):
+        text_x = leg_box_x + self.leg_box_width + (0.2 * self.leg_box_width)
+        text_y = leg_box_y + (0.5 * self.leg_box_depth)
+        self.ax_to_plot_on.text(
+            text_x, text_y, self.ordered_list_of_seqs_names[self.column_count],
+            verticalalignment='center', fontsize=8)
+
+
+    def _add_legend_rect(self, col_increment, row_increment):
+        leg_box_x = col_increment * self.x_coord_increments
+        leg_box_y = row_increment * self.y_coord_increments
+        self.ax_to_plot_on.add_patch(Rectangle(
+            (leg_box_x, leg_box_y), width=self.leg_box_width, height=self.leg_box_depth,
+            color=self.colour_dict[
+                self.ordered_list_of_seqs_names[self.column_count]]))
+
+        return leg_box_x, leg_box_y
+
 
 if __name__ == "__main__":
-    rest_analysis = RestrepoAnalysis(cutoff_abund=0.05, remove_se=False, maj_only=False, remove_se_clade_props=True, seq_distance_method='unifrac')
+    rest_analysis = RestrepoAnalysis(cutoff_abund=0.05, remove_se=False, maj_only=False, remove_se_clade_props=True, seq_distance_method='unifrac', sqrt=False)
     # rest_analysis.populate_data_sheet()
     # When we ran the analysis of variance ratios within the context of the between sample distance permanova analysis
     # we saw that one of the problematic groups was SE (S. hystrix) in the clade D matrix.
@@ -4205,17 +4722,17 @@ if __name__ == "__main__":
     # rest_analysis.output_seq_analysis_overview_outputs()
     #
     # plot the PCoA figures that given in the supplementary material of the ms
-    rest_analysis.plot_pcoa_of_cladal()
+    # rest_analysis.plot_pcoa_of_cladal()
     #
     # # create the temperature plot that is Figure 3 in the ms.
     # # this only produces the raw plots. Illustrator was used to get to the final results.
-    # rest_analysis._plot_temperature()
+    rest_analysis._plot_temperature()
     #
     # # make the basis for what is Figure 2 in the ms.
     # rest_analysis.make_sample_balance_figure()
     #
     # # run this to write out the distance files for running permanova in R
-    # rest_analysis.permute_sample_permanova()
+    rest_analysis.permute_sample_permanova()
     #
     # # run this to make the histograms of distribution of the abundances of profiles in samples
     # rest_analysis.histogram_of_all_abundance_values()
@@ -4226,8 +4743,5 @@ if __name__ == "__main__":
     # # plot the ternary figure that is fig 5 in the ms
     # rest_analysis.plot_ternary_clade_proportions()
 
-
-
-
-
-
+    # Run this to make the Symbiodinium profiles figure.
+    # rest_analysis.seq_to_profile_symbiodinium_figure()
