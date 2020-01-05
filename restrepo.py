@@ -258,7 +258,8 @@ class RestrepoAnalysis:
         self._make_temp_df()
         self.remotely_sensed_sst_df = self._make_remotely_sensed_sst_df()
 
-
+        # Output a temperature dataframe for the R analyses
+        self.make_temp_df_for_r()
 
         # ITS2 sequence abundance (post-MED) dataframe
         self.post_med_seq_abundance_relative_df = self._post_med_seq_abundance_relative_df()
@@ -332,7 +333,40 @@ class RestrepoAnalysis:
 
         self._del_propblem_sample()
 
+    def make_temp_df_for_r(self):
+        """We will use the daily_temperature_av_df and the remotely_sensed_sst_df dataframes to create
+        two csvs to be imported into R to do some regression analyses. The first df will only contain
+        the locally recorded data. The second will contain the remotely sensed data and corresponding local data
+        (four sites only). For each dataframe the columns will be:
+        data,minutes_from_first_record,temp,site,depth,local_remote
+        The local_remote col will have all rows set to local in the local_remote column"""
 
+        # Lets do the local only first
+        new_rows = []
+
+        site_name_abbrev_dict = {'t': 'tahla', 'q': 'qita_al_kirsh', 'sn': 'shib_nazar', 'am': 'abu_madafi',
+                                 'af': 'al_fahal'}
+        date_to_day_dict = {date:minute for date, minute in zip(self.daily_temperature_av_df.index.values.tolist(), range(len(self.daily_temperature_av_df.index)))}
+        # for each of the profile depth combinations
+        for temp_col_ind in list(self.daily_temperature_av_df):
+            # for each date in the profiel depth combination
+            for date, temp in self.daily_temperature_av_df[temp_col_ind].iteritems():
+                new_row = [
+                    date,
+                    date_to_day_dict[date],
+                    temp,
+                    site_name_abbrev_dict[temp_col_ind.split('_')[0]],
+                    int(temp_col_ind.split('_')[1]), 'local'
+                ]
+                new_rows.append(new_row)
+
+
+        local_df = pd.DataFrame(new_rows,
+            columns=["date", "minutes_from_first_record", "temp", "site", "depth", "local_remote"])
+
+        local_df.to_csv(os.path.join(self.outputs_dir, 'local_temp_df.csv'), index=False)
+
+        foo = 'bar'
 
 
 
