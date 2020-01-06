@@ -334,18 +334,21 @@ class RestrepoAnalysis:
         self._del_propblem_sample()
 
     def make_temp_df_for_r(self):
-        """We will use the daily_temperature_av_df and the remotely_sensed_sst_df dataframes to create
-        two csvs to be imported into R to do some regression analyses. The first df will only contain
+        """We will use the daily_temperature_av_df, the remotely_sensed_sst_df dataframes and the
+         daily_temperature_range_df to create
+        three csvs to be imported into R to do some regression analyses. The first df will only contain
         the locally recorded data. The second will contain the remotely sensed data and corresponding local data
-        (four sites only). For each dataframe the columns will be:
+        (four sites only). The third will be similar to the first but hold the intraday ranges.
+         For each dataframe the columns will be:
         data,minutes_from_first_record,temp,site,depth,local_remote
-        The local_remote col will have all rows set to local in the local_remote column"""
+        In the intraday df we will also have a column"""
 
-        # Lets do the local only first
+        # Lets do the local only first absolute temperatures
         new_rows = []
 
         site_name_abbrev_dict = {'t': 'tahla', 'q': 'qita_al_kirsh', 'sn': 'shib_nazar', 'am': 'abu_madafi',
                                  'af': 'al_fahal'}
+        site_name_abbrev_dict_rev = {v:k for k,v in site_name_abbrev_dict.items()}
         date_to_day_dict = {date:minute for date, minute in zip(self.daily_temperature_av_df.index.values.tolist(), range(len(self.daily_temperature_av_df.index)))}
         # for each of the profile depth combinations
         for temp_col_ind in list(self.daily_temperature_av_df):
@@ -365,6 +368,64 @@ class RestrepoAnalysis:
             columns=["date", "minutes_from_first_record", "temp", "site", "depth", "local_remote"])
 
         local_df.to_csv(os.path.join(self.outputs_dir, 'local_temp_df.csv'), index=False)
+
+
+        # Now lets do the local only intraday temperatures
+        new_rows = []
+
+        date_to_day_dict = {date: minute for date, minute in zip(self.daily_temperature_av_df.index.values.tolist(),
+                                                                 range(len(self.daily_temperature_av_df.index)))}
+        # for each of the profile depth combinations
+        for temp_col_ind in list(self.daily_temperature_range_df):
+            # for each date in the profiel depth combination
+            for date, temp in self.daily_temperature_range_df[temp_col_ind].iteritems():
+                new_row = [
+                    date,
+                    date_to_day_dict[date],
+                    temp,
+                    site_name_abbrev_dict[temp_col_ind.split('_')[0]],
+                    int(temp_col_ind.split('_')[1]), 'local'
+                ]
+                new_rows.append(new_row)
+
+        local_df = pd.DataFrame(new_rows,
+                                columns=["date", "minutes_from_first_record", "temp", "site", "depth", "local_remote"])
+
+        local_df.to_csv(os.path.join(self.outputs_dir, 'local_temp_intraday_df.csv'), index=False)
+
+        # now make the remote vs local csv
+        # A dict that translates the names in the remotely sensed df to the names used above in the local
+        # df
+        name_conversion_dict = {'Shib Nazar':'shib_nazar', 'Al Fahal':'al_fahal', 'Qita al Kirsh':'qita_al_kirsh', 'Tahla':'tahla'}
+        new_rows = []
+        for remote_temp_col in list(self.remotely_sensed_sst_df):
+            local_name = name_conversion_dict[remote_temp_col]
+            # first populate for the remote data
+            for date, temp in self.remotely_sensed_sst_df[remote_temp_col].iteritems():
+                new_row = [
+                    date,
+                    date_to_day_dict[date],
+                    temp,
+                    local_name,
+                    1, 'remote'
+                ]
+                new_rows.append(new_row)
+
+            # now populate the local data for this remote site
+            for date, temp in self.daily_temperature_av_df[f'{site_name_abbrev_dict_rev[local_name]}_1'].iteritems():
+                new_row = [
+                    date,
+                    date_to_day_dict[date],
+                    temp,
+                    local_name,
+                    1, 'local'
+                ]
+                new_rows.append(new_row)
+
+        remote_df = pd.DataFrame(new_rows,
+                                columns=["date", "minutes_from_first_record", "temp", "site", "depth", "local_remote"])
+
+        remote_df.to_csv(os.path.join(self.outputs_dir, 'remote_temp_df.csv'), index=False)
 
         foo = 'bar'
 
