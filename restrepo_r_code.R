@@ -185,11 +185,144 @@ aov_residuals <- residuals(object = res.aov )
 shapiro.test(x = aov_residuals )
 #Normality assumptions are failed
 # Thus perform kruskal-wallis test
-res.kruskal <- kruskal.test(temp ~ depth, data = local_temp_intraday_df)
+summary(res.kruskal)
 # For pairwise inferences wilcox
 pairwise.wilcox.test(local_temp_intraday_df$temp, local_temp_intraday_df$depth,
                      p.adjust.method = "BH")
+# 	Pairwise comparisons using Wilcoxon rank sum test 
+#
+# data:  local_temp_intraday_df$temp and local_temp_intraday_df$depth 
+#
+#  1      15    
+#  15 <2e-16 -     
+#  30 <2e-16 0.0017
 
+# Test the remote vs local profiles
+remote_local_temp_df <- read.table(file="remote_temp_df.csv", header=TRUE, sep=',', stringsAsFactors = TRUE)
+remote_local_temp_df$depth = as.factor(remote_local_temp_df$depth)
+sapply(remote_local_temp_df, class)
+
+# Do these tests site by site
+# tahla
+m.interaction <- lm(temp ~ minutes_from_first_record*local_remote, data=remote_local_temp_df, subset = (site=='tahla'))
+anova(m.interaction)
+summary(m.interaction)
+
+#  Call:
+# lm(formula = temp ~ minutes_from_first_record * local_remote,
+#    data = remote_local_temp_df, subset = (site == "tahla"))
+# 
+# Residuals:
+#   Min       1Q   Median       3Q      Max
+# -1.27411 -0.36742 -0.00174  0.26071  1.50697
+# 
+# Coefficients:
+#   Estimate Std. Error t value Pr(>|t|)
+# (Intercept)                                  25.529920   0.088570 288.247   <2e-16 ***
+#   minutes_from_first_record                     0.056628   0.001126  50.295   <2e-16 ***
+#   local_remoteremote                           -1.162088   0.125256  -9.278   <2e-16 ***
+#   minutes_from_first_record:local_remoteremote -0.002771   0.001592  -1.741   0.0829 .
+# There is a non-significant difference in slope coefficient (interaction)
+# Do ancova
+m.interaction <- aov(temp ~ minutes_from_first_record+local_remote, data=remote_local_temp_df, subset=(site=='tahla'))
+summary(m.interaction)
+# Intercept significantly different
+
+# qita_al_kirsh
+m.interaction <- lm(temp ~ minutes_from_first_record+local_remote, data=remote_local_temp_df, subset = (site=='qita_al_kirsh'))
+anova(m.interaction)
+summary(m.interaction)
+
+# Call:
+#   lm(formula = temp ~ minutes_from_first_record * local_remote, 
+#      data = remote_local_temp_df, subset = (site == "qita_al_kirsh"))
+# 
+# Residuals:
+#   Min       1Q   Median       3Q      Max 
+# -1.14916 -0.36360  0.00273  0.27551  1.55918 
+# 
+# Coefficients:
+#   Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                                  25.1378136  0.0886695 283.500  < 2e-16 ***
+#   minutes_from_first_record                     0.0519122  0.0011272  46.054  < 2e-16 ***
+#   local_remoteremote                           -0.9312411  0.1253976  -7.426 1.47e-12 ***
+#   minutes_from_first_record:local_remoteremote  0.0008036  0.0015941   0.504    0.615    
+# ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.5218 on 270 degrees of freedom
+# Multiple R-squared:  0.9434,	Adjusted R-squared:  0.9428 
+# F-statistic:  1501 on 3 and 270 DF,  p-value: < 2.2e-16
+
+# There is a non-significant difference in slope coefficient (interaction)
+# Do ancova
+m.interaction <- aov(temp ~ minutes_from_first_record+local_remote, data=remote_local_temp_df, subset=(site=='qita_al_kirsh'))
+summary(m.interaction)
+# Intercept significantly different
+
+# qita_al_kirsh
+m.interaction <- lm(temp ~ minutes_from_first_record*local_remote, data=remote_local_temp_df, subset = (site=='al_fahal'))
+anova(m.interaction)
+summary(m.interaction)
+
+# Call:
+#   lm(formula = temp ~ minutes_from_first_record * local_remote, 
+#      data = remote_local_temp_df, subset = (site == "al_fahal"))
+# 
+# Residuals:
+#   Min       1Q   Median       3Q      Max 
+# -1.21763 -0.35225 -0.01923  0.26573  1.54230 
+# 
+# Coefficients:
+#   Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                                  25.410958   0.087389 290.781   <2e-16 ***
+#   minutes_from_first_record                     0.049776   0.001111  44.807   <2e-16 ***
+#   local_remoteremote                           -1.096338   0.123586  -8.871   <2e-16 ***
+#   minutes_from_first_record:local_remoteremote  0.002974   0.001571   1.893   0.0594 .  
+# ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.5142 on 270 degrees of freedom
+# Multiple R-squared:  0.943,	Adjusted R-squared:  0.9424 
+# F-statistic:  1490 on 3 and 270 DF,  p-value: < 2.2e-16
+
+# There is a non-significant difference in slope coefficient (interaction)
+# Do ancova
+m.interaction <- aov(temp ~ minutes_from_first_record+local_remote, data=remote_local_temp_df, subset=(site=='al_fahal'))
+summary(m.interaction)
+# Intercept significantly different
+
+# shib_nazar
+m.interaction <- lm(temp ~ minutes_from_first_record*local_remote, data=remote_local_temp_df, subset = (site=='shib_nazar'))
+anova(m.interaction)
+summary(m.interaction)
+
+# Call:
+#   lm(formula = temp ~ minutes_from_first_record * local_remote, 
+#      data = remote_local_temp_df, subset = (site == "shib_nazar"))
+# 
+# Residuals:
+#   Min       1Q   Median       3Q      Max 
+# -1.12117 -0.39907 -0.00507  0.31355  1.45586 
+# 
+# Coefficients:
+#   Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                                  24.955054   0.088781 281.087  < 2e-16 ***
+#   minutes_from_first_record                     0.050011   0.001129  44.312  < 2e-16 ***
+#   local_remoteremote                           -0.729649   0.125555  -5.811 1.74e-08 ***
+#   minutes_from_first_record:local_remoteremote  0.001303   0.001596   0.816    0.415    
+# ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 0.5224 on 270 degrees of freedom
+# Multiple R-squared:  0.9387,	Adjusted R-squared:  0.938 
+# F-statistic:  1378 on 3 and 270 DF,  p-value: < 2.2e-16
+
+# There is a non-significant difference in slope coefficient (interaction)
+# Do ancova
+m.interaction <- aov(temp ~ minutes_from_first_record+local_remote, data=remote_local_temp_df, subset=(site=='shib_nazar'))
+summary(m.interaction)
+# Intercept significantly different
 
 # This part of the code was used to run the PERMANOVA analyses, run the beradisper analyses, and to test significance of pairwise tests.
 library(vegan)
