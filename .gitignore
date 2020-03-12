@@ -7,3 +7,4 @@ cache/
 figures/
 *.png
 .DS_Store
+pettay_genotypes.csv

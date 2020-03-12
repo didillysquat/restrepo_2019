@@ -1,7 +1,8 @@
 # This R file is conserned with the Restrepo 2019 publication
 
 # This part of the code was used to run the linear models related to the temperature profiles.
-
+# https://stats.stackexchange.com/questions/33013/what-test-can-i-use-to-compare-slopes-from-two-or-more-regression-models/299651#299651?newreg=8f2271eb1fb045398e6a7d089504a2e3
+# http://r-eco-evo.blogspot.com/2011/08/comparing-two-regression-slopes-by.html
 # TESTING of Tahla compared to the other sites
 # We are testing for signficance of slope coefficient at the 1m depth and 15m depth
 # 1m depth
@@ -90,7 +91,7 @@ summary(m.interaction)
 
 # TESTING of the depths at each site
 # Tahla
-m.interaction <- aov(temp ~ minutes_from_first_record*depth, data=local_temp_df, subset=(site=='tahla'))
+m.interaction <- lm(temp ~ minutes_from_first_record*depth, data=local_temp_df, subset=(site=='tahla'))
 summary(m.interaction)
 m.interaction$coefficients
 m.lst <- lstrends(m.interaction, "depth", var="minutes_from_first_record")
@@ -193,7 +194,7 @@ pairwise.wilcox.test(local_temp_intraday_df$temp, local_temp_intraday_df$depth,
 #
 # data:  local_temp_intraday_df$temp and local_temp_intraday_df$depth 
 #
-#  1      15    
+#      1      15    
 #  15 <2e-16 -     
 #  30 <2e-16 0.0017
 
@@ -229,7 +230,7 @@ summary(m.interaction)
 # Intercept significantly different
 
 # qita_al_kirsh
-m.interaction <- lm(temp ~ minutes_from_first_record+local_remote, data=remote_local_temp_df, subset = (site=='qita_al_kirsh'))
+m.interaction <- lm(temp ~ minutes_from_first_record*local_remote, data=remote_local_temp_df, subset = (site=='qita_al_kirsh'))
 anova(m.interaction)
 summary(m.interaction)
 
@@ -260,7 +261,7 @@ m.interaction <- aov(temp ~ minutes_from_first_record+local_remote, data=remote_
 summary(m.interaction)
 # Intercept significantly different
 
-# qita_al_kirsh
+# al_fahal
 m.interaction <- lm(temp ~ minutes_from_first_record*local_remote, data=remote_local_temp_df, subset = (site=='al_fahal'))
 anova(m.interaction)
 summary(m.interaction)

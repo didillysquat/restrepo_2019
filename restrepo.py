@@ -333,6 +333,60 @@ class RestrepoAnalysis:
 
         self._del_propblem_sample()
 
+    def pettay_host_specificity(self):
+        """ We want to have a quick look at the supplementary material from the Pettay publication that
+        Reviewer 2 is referring to with regards to whther there is sufficient data to support a hypothesis
+        of host-sepcificity. I think we will find that the sampling frequency for each different host was too
+        small.
+        We will output a table that will allow for a quick summary of the data.
+        It will have the following columns:
+        Site taxa number of that taxa and the genotypes.
+        The allelle of each locus is given in the input data and we will consider genotypes
+        identical only if they have the same allelle at each locus across all loci."""
+
+        # read in the csv with the input
+        df = pd.read_csv("pettay_genotypes.csv", header=None)
+        # remove the random final column
+        df = df.iloc[:,:-1]
+
+        genotype_id_to_csv = dict()
+        csv_to_genotype_id = dict()
+        genotype_count_dict = defaultdict(int)
+        genotype_list_dict = defaultdict(list)
+        # create a dictionary of the genotype definitions.
+        # this should take csv list that is the allel values in order
+        genotype_count = 0
+        for ind, ser in df.iterrows():
+            genotype_str = ','.join(str(_) for _ in ser[4:].values.tolist())
+            genotype_count_dict[genotype_str] += 1
+            if genotype_str not in csv_to_genotype_id:
+                csv_to_genotype_id[genotype_str] = genotype_count
+                genotype_id_to_csv[genotype_count] = csv_to_genotype_id
+                genotype_count += 1
+
+        # here we have created the genotype ids that we can count
+
+        # now create a dict that will hold the information that we will populate the end table with
+        # This dict will have a csv of the region, site and taxa name as key. as the value it will
+        # have a tup that is an int (the count of this sample) and a set of the genotypes found in this sample
+        data_dict = dict()
+        for ind, ser in df.iterrows():
+            region = ser[1]
+            site = ser[2]
+            taxa = ser[3]
+            genotype_str = ','.join(str(_) for _ in ser[4:].values.tolist())
+            genotype_id = csv_to_genotype_id[genotype_str]
+            k = ','.join([region, site, taxa])
+            genotype_list_dict[genotype_id].append(k)
+            if k in data_dict:
+                data_dict[k][0] += 1
+                data_dict[k][1].add(genotype_id)
+            else:
+                data_dict[k] = [1, set([genotype_id])]
+
+
+        foo = 'bar'
+
     def make_temp_df_for_r(self):
         """We will use the daily_temperature_av_df, the remotely_sensed_sst_df dataframes and the
          daily_temperature_range_df to create
@@ -4821,13 +4875,13 @@ if __name__ == "__main__":
     #
     # # create the temperature plot that is Figure 3 in the ms.
     # # this only produces the raw plots. Illustrator was used to get to the final results.
-    rest_analysis._plot_temperature()
+    # rest_analysis._plot_temperature()
     #
     # # make the basis for what is Figure 2 in the ms.
     # rest_analysis.make_sample_balance_figure()
     #
     # # run this to write out the distance files for running permanova in R
-    rest_analysis.permute_sample_permanova()
+    # rest_analysis.permute_sample_permanova()
     #
     # # run this to make the histograms of distribution of the abundances of profiles in samples
     # rest_analysis.histogram_of_all_abundance_values()
@@ -4840,3 +4894,6 @@ if __name__ == "__main__":
 
     # Run this to make the Symbiodinium profiles figure.
     # rest_analysis.seq_to_profile_symbiodinium_figure()
+
+    # Run this to produce a quick table to look at host-specificity in the pettay supplemetary data
+    rest_analysis.pettay_host_specificity()
